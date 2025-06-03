@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package internal.v1;
+
+option go_package = "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1;orchestratorinternalv1";
+
+message PaymentStep {
+  string step_id = 1;
+  string provider_name = 2;
+  int64  amount = 3;
+  string currency = 4;
+  bool   is_fan_out = 5; // Indicates if this step involves fanning out to multiple providers
+  map<string, string> metadata = 6;
+  // ProviderPayload represents the specific data a provider adapter needs.
+  // It's kept generic here; specific adapters will know how to interpret it.
+  // For actual generation, you might use google.protobuf.Any or define concrete structures.
+  // For now, we'll use a map as a placeholder for flexibility.
+  map<string, string> provider_payload = 7;
+}
