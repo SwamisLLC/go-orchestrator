@@ -41,7 +41,7 @@ func (ppe *PaymentPolicyEnforcer) Evaluate(
 	// step *internalv1.PaymentStep, // Placeholder for actual payment step
 	stepCtx context.StepExecutionContext,
 ) (PolicyDecision, error) {
-	
+
 	// Basic stub: always allow retry, don't skip fallback, don't escalate.
 	return PolicyDecision{
 		AllowRetry:     true,

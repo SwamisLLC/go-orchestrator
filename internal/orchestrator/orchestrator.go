@@ -96,7 +96,7 @@ func (o *Orchestrator) Execute(
 			LatencyMs:    latency, // Placeholder latency
 			Details:      map[string]string{"stubbed_result": "success"},
 		}
-		
+
 		// Ensure details map is initialized
 		if stepResult.Details == nil {
 		    stepResult.Details = make(map[string]string)

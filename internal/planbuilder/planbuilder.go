@@ -51,7 +51,7 @@ func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestrato
 		Metadata:     make(map[string]string), // Initialize metadata map
 		ProviderPayload: make(map[string]string), // Initialize provider payload map
 	}
-	
+
 	// Ensure metadata and provider_payload are not nil, even if empty
 	if rawStep.Metadata == nil {
 	    rawStep.Metadata = make(map[string]string)
@@ -71,7 +71,7 @@ func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestrato
 	if err != nil {
 		return nil, fmt.Errorf("failed to optimize payment plan: %w", err)
 	}
-	
+
 	// Ensure steps are not nil after optimization
 	if optimizedPlan != nil && optimizedPlan.Steps != nil {
 	    for _, step := range optimizedPlan.Steps {

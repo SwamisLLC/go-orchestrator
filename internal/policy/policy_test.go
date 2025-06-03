@@ -21,7 +21,7 @@ func TestPaymentPolicyEnforcer_Evaluate_Stub(t *testing.T) {
 	domainCtx := context.DomainContext{
 		MerchantID: "test-merchant",
 	}
-	
+
 	// Create a dummy PaymentStep if it were used by the Evaluate method.
 	// For the current stub, it's not, but good to have for future.
 	// dummyStep := &internalv1.PaymentStep{ /* ... fields ... */ }
