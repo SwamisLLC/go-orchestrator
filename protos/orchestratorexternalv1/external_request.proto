@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package external.v1;
+
+option go_package = "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1;orchestratorexternalv1";
+
+message ExternalRequest {
+  string request_id = 1;
+  string merchant_id = 2;
+  int64  amount = 3;
+  string currency = 4;
+  CustomerDetails customer = 5;
+  PaymentMethod   payment_method = 6;
+  map<string, string> metadata = 7;
+}
+
+message CustomerDetails {
+  string name  = 1;
+  string email = 2;
+  string phone = 3;
+}
+
+message PaymentMethod {
+  oneof method {
+    CardInfo card = 1;
+    WalletInfo wallet = 2;
+  }
+}
+
+message CardInfo {
+  string card_number = 1;
+  string expiry_month = 2;
+  string expiry_year = 3;
+  string cvv = 4;
+}
+
+message WalletInfo {
+  string wallet_type = 1; // e.g., "ApplePay", "GooglePay"
+  string token = 2;
+}

@@ -1,0 +1,29 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21' # Specify your Go version
+
+    # Placeholder for buf setup and generate
+    # - name: Setup Buf
+    #   uses: bufbuild/action-setup-buf@v1
+    #
+    # - name: Generate from Schemas
+    #   run: make gen
+
+    # Placeholder for linting
+    # - name: Lint
+    #   run: make lint
+
+    # Placeholder for testing
+    # - name: Test
+    #   run: make test

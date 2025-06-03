@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package internal.v1;
+
+option go_package = "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1;orchestratorinternalv1";
+
+message StepResult {
+  string step_id = 1;
+  bool   success = 2;
+  string provider_name = 3;
+  string error_code = 4;    // e.g., "INSUFFICIENT_FUNDS", "NETWORK_ERROR"
+  string error_message = 5; // Detailed error message
+  int64  latency_ms = 6;
+  map<string, string> details = 7; // Additional details, like transaction ID from provider
+}
