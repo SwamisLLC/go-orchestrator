@@ -96,7 +96,7 @@ func TestPlanBuilder_Build_NilExternalRequest(t *testing.T) {
 	repo := NewTestMerchantConfigRepository()
 	mockCompositeSvc := &MockCompositePaymentService{}
 	pb := NewPlanBuilder(repo, mockCompositeSvc)
-	
+
 	merchantCfg, _ := repo.Get("merchant123")
 	domainCtx := context.DomainContext{
 		MerchantID:           "merchant123",
