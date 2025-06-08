@@ -1,48 +1,101 @@
 package policy
 
 import (
+	"fmt"
+	"github.com/Knetic/govaluate" // Import govaluate
 	"github.com/yourorg/payment-orchestrator/internal/context"
-	// Assuming PaymentStep and other necessary types will be defined or imported
-	// For now, we might not need them for the basic stub.
-	// internalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 )
+
+// PolicyRule defines a structure for a rule.
+type PolicyRule struct {
+	ID         string // Unique ID for the rule
+	Expression string // govaluate expression string
+	Decision   PolicyDecision // The decision to return if this rule evaluates to true
+	Priority   int    // Lower numbers run first (optional, for now sequential)
+}
 
 // PolicyDecision represents the outcome of a policy evaluation.
 type PolicyDecision struct {
 	AllowRetry     bool // Whether a failed step can be retried
 	SkipFallback   bool // Whether to skip fallback providers
 	EscalateManual bool // Whether this payment needs manual review
-	// Add other decision fields as necessary
+	// Add other decision fields as necessary, e.g., SkipStep bool
 }
 
-// PaymentPolicyEnforcer evaluates dynamic business policies.
-// For this basic version, it's a stub.
+
 type PaymentPolicyEnforcer struct {
-	// In a real implementation, this might hold compiled rules,
-	// a connection to a policy engine, or a policy repository.
-	// For example:
-	// policyRepo PolicyRepository
-	// expressionCache map[string]*govaluate.EvaluableExpression
-	// metricsEmitter  MetricsEmitter
+	rules            []compiledRule
+	// metricsEmitter  MetricsEmitter // For future use
 }
 
-// NewPaymentPolicyEnforcer creates a new PaymentPolicyEnforcer.
-// For the stub, it doesn't need any parameters.
-func NewPaymentPolicyEnforcer() *PaymentPolicyEnforcer {
-	return &PaymentPolicyEnforcer{}
+type compiledRule struct {
+	id         string
+	expression *govaluate.EvaluableExpression
+	decision   PolicyDecision
+	priority   int // For future sorting, not used in current sequential evaluation
 }
 
-// Evaluate is the method that evaluates policies for a given payment step.
-// For this basic stub, it always returns a decision that allows retry.
-// The parameters step and stepCtx are included to match the spec's future signature,
-// but are not used in this stub.
+// NewPaymentPolicyEnforcer compiles rules.
+// Rules with invalid expressions will cause an error.
+// Rules are not sorted by priority in this version; they are evaluated in the order provided.
+func NewPaymentPolicyEnforcer(rules []PolicyRule) (*PaymentPolicyEnforcer, error) {
+	if rules == nil {
+	    rules = []PolicyRule{} // Default to no rules, results in default decisions
+	}
+
+	compiled := make([]compiledRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Expression == "" {
+		    return nil, fmt.Errorf("policy rule ID '%s' has an empty expression", rule.ID)
+		}
+		expr, err := govaluate.NewEvaluableExpression(rule.Expression)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile rule ID '%s' expression '%s': %w", rule.ID, rule.Expression, err)
+		}
+		compiled = append(compiled, compiledRule{
+			id:         rule.ID,
+			expression: expr,
+			decision:   rule.Decision,
+			priority:   rule.Priority, // Store priority for future use
+		})
+	}
+	// TODO: Sort compiled rules by priority if needed in the future.
+	return &PaymentPolicyEnforcer{rules: compiled}, nil
+}
+
+// Evaluate uses govaluate to check rules against StepExecutionContext.
+// The first rule that evaluates to true determines the PolicyDecision.
+// If no rules match, a default "allow all" decision is returned.
 func (ppe *PaymentPolicyEnforcer) Evaluate(
-	domainCtx context.DomainContext,
-	// step *internalv1.PaymentStep, // Placeholder for actual payment step
+	domainCtx context.DomainContext, // domainCtx might be needed for some parameters not in stepCtx
 	stepCtx context.StepExecutionContext,
 ) (PolicyDecision, error) {
+	parameters := map[string]interface{}{
+		"amount":       stepCtx.AmountCents,
+		"currency":     stepCtx.Currency,
+		"region":       stepCtx.Region,
+		"merchantTier": stepCtx.MerchantTier,
+		"fraudScore":   stepCtx.FraudScore,
+		// Example of using a field from domainCtx if needed:
+		// "merchantID":   domainCtx.MerchantID,
+	}
 
-	// Basic stub: always allow retry, don't skip fallback, don't escalate.
+	for _, cr := range ppe.rules {
+		result, err := cr.expression.Evaluate(parameters)
+		if err != nil {
+			// Error during evaluation of a specific rule (e.g., type mismatch if params are wrong, or undefined function)
+			// This indicates a problem with the rule expression or parameters provided.
+			return PolicyDecision{}, fmt.Errorf("error evaluating rule ID '%s' (expression: '%s'): %w. Parameters: %+v", cr.id, cr.expression.String(), err, parameters)
+		}
+
+		if boolResult, ok := result.(bool); ok && boolResult {
+			// Rule matched, return its predefined decision
+			// fmt.Printf("Rule '%s' matched. Decision: %+v\n", cr.id, cr.decision) // For debugging
+			return cr.decision, nil
+		}
+	}
+
+	// Default decision if no rules match: allow retry, don't skip fallback, don't escalate.
 	return PolicyDecision{
 		AllowRetry:     true,
 		SkipFallback:   false,

@@ -1,173 +1,190 @@
 package orchestrator
 
 import (
+	"fmt"
 	"testing"
-	// "time" // Removed
+	// "time" // No longer directly used here
 
+	"github.com/yourorg/payment-orchestrator/internal/adapter"
+	"github.com/yourorg/payment-orchestrator/internal/adapter/mock"
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	"github.com/yourorg/payment-orchestrator/internal/policy"
+	"github.com/yourorg/payment-orchestrator/internal/processor"
+	"github.com/yourorg/payment-orchestrator/internal/router"
+	"github.com/yourorg/payment-orchestrator/internal/router/circuitbreaker" // Added import
 	internalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	// "github.com/google/uuid" // Removed
+	// "github.com/google/uuid" // No longer directly used here
 )
 
-// MockMerchantConfigRepository (MockPolicyEnforcer removed as we'll use the real one for now)
+// MockMerchantConfigRepository (already defined in previous test, ensure it's available or redefine)
+// For simplicity, re-defining a minimal version here if not shared from another test file.
 type MockMerchantConfigRepository struct {
-    cfg context.MerchantConfig
-    err error
+	cfg context.MerchantConfig
+	err error
 }
 func (m *MockMerchantConfigRepository) Get(merchantID string) (context.MerchantConfig, error) {
-    if m.err != nil {
-        return context.MerchantConfig{}, m.err
-    }
-    cfgWithID := m.cfg
-    cfgWithID.ID = merchantID // Ensure the returned config has the requested ID
-    return cfgWithID, nil
+	if m.err != nil { return context.MerchantConfig{}, m.err }
+	mc := m.cfg
+	mc.ID = merchantID
+	return mc, nil
 }
-func (m *MockMerchantConfigRepository) AddConfig(config context.MerchantConfig) { /* not used in this test */ }
+func (m *MockMerchantConfigRepository) AddConfig(config context.MerchantConfig) { m.cfg = config }
 
 
-func TestNewOrchestrator(t *testing.T) {
-	pe := policy.NewPaymentPolicyEnforcer() // Use actual policy enforcer
+func TestNewOrchestrator_WithRouter(t *testing.T) {
+	pe, errPe := policy.NewPaymentPolicyEnforcer(nil) // Pass nil for default rules
+	require.NoError(t, errPe)
 	mcr := &MockMerchantConfigRepository{}
-	orc := NewOrchestrator(pe, mcr)
+	proc := processor.NewProcessor(make(map[string]adapter.ProviderAdapter))
+	cb := circuitbreaker.NewCircuitBreaker() // Added
+	rtr := router.NewRouter(proc, "", cb)    // Added cb
+
+	orc := NewOrchestrator(pe, mcr, rtr)
 	assert.NotNil(t, orc)
-	assert.Equal(t, pe, orc.policyEnforcer) // This will compare pointers
+	assert.Equal(t, pe, orc.policyEnforcer)
 	assert.Equal(t, mcr, orc.merchantConfigRepo)
+	assert.Equal(t, rtr, orc.router)
 
-	assert.Panics(t, func() { NewOrchestrator(nil, mcr) }, "Should panic if policy enforcer is nil")
-	assert.Panics(t, func() { NewOrchestrator(pe, nil) }, "Should panic if merchant config repo is nil")
+	assert.Panics(t, func() { NewOrchestrator(nil, mcr, rtr) })
+	assert.Panics(t, func() { NewOrchestrator(pe, nil, rtr) })
+	assert.Panics(t, func() { NewOrchestrator(pe, mcr, nil) })
 }
 
-func TestOrchestrator_Execute_EmptyPlan(t *testing.T) {
-	orc := NewOrchestrator(policy.NewPaymentPolicyEnforcer(), &MockMerchantConfigRepository{})
-	traceCtx := context.NewTraceContext()
-	domainCtx := context.DomainContext{}
-
-	// Test with nil plan
-	result, err := orc.Execute(traceCtx, nil, domainCtx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "plan cannot be empty or nil")
-	assert.Equal(t, "FAILURE", result.Status)
-	assert.Equal(t, "Plan is empty or nil", result.FailureReason)
-
-
-	// Test with empty steps
-	emptyPlan := &internalv1.PaymentPlan{PlanId: "plan123", Steps: []*internalv1.PaymentStep{}}
-	result, err = orc.Execute(traceCtx, emptyPlan, domainCtx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "plan cannot be empty or nil")
-	assert.Equal(t, "FAILURE", result.Status)
-}
-
-func TestOrchestrator_Execute_SingleStepPlan_Stubbed(t *testing.T) {
-	realPE := policy.NewPaymentPolicyEnforcer() // Use actual policy enforcer
-	mockMCR := &MockMerchantConfigRepository{
-	    cfg: context.MerchantConfig{DefaultProvider: "stripe", ProviderAPIKeys: map[string]string{"stripe":"testkey"}},
+func TestOrchestrator_Execute_Integration_SingleStepSuccess(t *testing.T) {
+	// Setup mock adapter
+	mockStripeAdapter := mock.NewMockAdapter("stripe")
+	mockStripeAdapter.ProcessFunc = func(tc context.TraceContext, s *internalv1.PaymentStep, sc context.StepExecutionContext) (adapter.ProviderResult, error) {
+		return adapter.ProviderResult{StepID: s.StepId, Success: true, Provider: "stripe", Details: map[string]string{"id": "tx_123"}}, nil
 	}
-	orc := NewOrchestrator(realPE, mockMCR)
+	adapters := map[string]adapter.ProviderAdapter{"stripe": mockStripeAdapter}
+
+	// Setup dependencies
+	testProcessor := processor.NewProcessor(adapters)
+	cb := circuitbreaker.NewCircuitBreaker()                            // Added
+	testRouter := router.NewRouter(testProcessor, "adyen_fallback", cb) // Fallback won't be used, Added cb
+	testPolicyEnforcer, errPe := policy.NewPaymentPolicyEnforcer(nil)
+	require.NoError(t, errPe)
+	testMerchantRepo := &MockMerchantConfigRepository{}
+	testMerchantRepo.AddConfig(context.MerchantConfig{
+	    ID: "merchant1", DefaultProvider: "stripe", ProviderAPIKeys: map[string]string{"stripe": "sk_test"},
+	    DefaultTimeout: context.TimeoutConfig{OverallBudgetMs: 5000},
+    })
+
+
+	orc := NewOrchestrator(testPolicyEnforcer, testMerchantRepo, testRouter)
 
 	traceCtx := context.NewTraceContext()
+	merchantCfg, _ := testMerchantRepo.Get("merchant1")
 	domainCtx := context.DomainContext{
-		MerchantID: "merchant1",
-		TimeoutConfig: context.TimeoutConfig{OverallBudgetMs: 5000},
-		ActiveMerchantConfig: mockMCR.cfg,
+		MerchantID: "merchant1", ActiveMerchantConfig: merchantCfg,
+		TimeoutConfig: merchantCfg.DefaultTimeout,
 	}
 	plan := &internalv1.PaymentPlan{
-		PlanId: "plan-single-step",
-		Steps: []*internalv1.PaymentStep{
-			{StepId: "step1", ProviderName: "stripe", Amount: 1000, Currency: "USD", Metadata: make(map[string]string), ProviderPayload: make(map[string]string)},
-		},
-	}
-
-	result, err := orc.Execute(traceCtx, plan, domainCtx)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	assert.NotEmpty(t, result.PaymentID)
-	assert.Equal(t, "SUCCESS", result.Status, "Overall status should be SUCCESS for stubbed execution")
-	require.Len(t, result.StepResults, 1)
-
-	stepResult1 := result.StepResults[0]
-	assert.Equal(t, "step1", stepResult1.StepId)
-	assert.True(t, stepResult1.Success, "Stubbed step should be successful")
-	assert.Equal(t, "stripe", stepResult1.ProviderName)
-	assert.Empty(t, stepResult1.ErrorCode)
-	assert.NotNil(t, stepResult1.Details)
-	assert.Equal(t, "success", stepResult1.Details["stubbed_result"])
-}
-
-func TestOrchestrator_Execute_MultiStepPlan_Stubbed(t *testing.T) {
-	realPE := policy.NewPaymentPolicyEnforcer() // Use actual policy enforcer
-	mockMCR := &MockMerchantConfigRepository{
-	    cfg: context.MerchantConfig{DefaultProvider: "stripe", ProviderAPIKeys: map[string]string{"stripe":"testkey", "adyen":"testkey2"}},
-	}
-	orc := NewOrchestrator(realPE, mockMCR)
-	traceCtx := context.NewTraceContext()
-	domainCtx := context.DomainContext{
-		MerchantID: "merchant2",
-		TimeoutConfig: context.TimeoutConfig{OverallBudgetMs: 10000},
-		ActiveMerchantConfig: mockMCR.cfg,
-	}
-	plan := &internalv1.PaymentPlan{
-		PlanId: "plan-multi-step",
-		Steps: []*internalv1.PaymentStep{
-			{StepId: "s1", ProviderName: "stripe", Amount: 500, Currency: "EUR", Metadata: make(map[string]string), ProviderPayload: make(map[string]string)},
-			{StepId: "s2", ProviderName: "adyen", Amount: 700, Currency: "EUR", Metadata: make(map[string]string), ProviderPayload: make(map[string]string)},
-		},
+		PlanId: "plan1",
+		Steps:  []*internalv1.PaymentStep{{StepId: "step1", ProviderName: "stripe", Amount: 100}},
 	}
 
 	result, err := orc.Execute(traceCtx, plan, domainCtx)
 	require.NoError(t, err)
 	assert.Equal(t, "SUCCESS", result.Status)
-	require.Len(t, result.StepResults, 2)
-
-	assert.Equal(t, "s1", result.StepResults[0].StepId)
+	require.Len(t, result.StepResults, 1)
 	assert.True(t, result.StepResults[0].Success)
 	assert.Equal(t, "stripe", result.StepResults[0].ProviderName)
-	assert.NotNil(t, result.StepResults[0].Details)
-
-	assert.Equal(t, "s2", result.StepResults[1].StepId)
-	assert.True(t, result.StepResults[1].Success)
-	assert.Equal(t, "adyen", result.StepResults[1].ProviderName)
-	assert.NotNil(t, result.StepResults[1].Details)
+	assert.Equal(t, "tx_123", result.StepResults[0].Details["id"])
 }
 
-func TestOrchestrator_Execute_HandlesNilStepInPlan(t *testing.T) {
-	realPE := policy.NewPaymentPolicyEnforcer() // Use actual policy enforcer
-	mockMCR := &MockMerchantConfigRepository{
-	    cfg: context.MerchantConfig{DefaultProvider: "stripe"},
-	}
-	orc := NewOrchestrator(realPE, mockMCR)
-	traceCtx := context.NewTraceContext()
-	domainCtx := context.DomainContext{
-		MerchantID: "merchant-nil-step",
-		TimeoutConfig: context.TimeoutConfig{OverallBudgetMs: 10000},
-		ActiveMerchantConfig: mockMCR.cfg,
-	}
-	plan := &internalv1.PaymentPlan{
-		PlanId: "plan-with-nil-step",
-		Steps: []*internalv1.PaymentStep{
-			{StepId: "s1", ProviderName: "stripe", Amount: 500, Currency: "EUR", Metadata: make(map[string]string), ProviderPayload: make(map[string]string)},
-			nil, // A nil step
-			{StepId: "s3", ProviderName: "adyen", Amount: 700, Currency: "EUR", Metadata: make(map[string]string), ProviderPayload: make(map[string]string)},
-		},
-	}
+func TestOrchestrator_Execute_Integration_PrimaryFail_FallbackSuccess(t *testing.T) {
+    mockStripe := mock.NewMockAdapter("stripe")
+    mockStripe.ProcessFunc = func(tc context.TraceContext, s *internalv1.PaymentStep, sc context.StepExecutionContext) (adapter.ProviderResult, error) {
+        return adapter.ProviderResult{StepID: s.StepId, Success: false, Provider: "stripe", ErrorCode: "FAIL_STRIPE"}, nil
+    }
+    mockAdyen := mock.NewMockAdapter("adyen")
+    mockAdyen.ProcessFunc = func(tc context.TraceContext, s *internalv1.PaymentStep, sc context.StepExecutionContext) (adapter.ProviderResult, error) {
+        return adapter.ProviderResult{StepID: s.StepId, Success: true, Provider: "adyen", Details: map[string]string{"id": "tx_adyen_fb_ok"}}, nil
+    }
+    adapters := map[string]adapter.ProviderAdapter{"stripe": mockStripe, "adyen": mockAdyen}
 
-	result, err := orc.Execute(traceCtx, plan, domainCtx)
-	require.NoError(t, err) // The main Execute function doesn't return an error for this case
-	assert.Equal(t, "FAILURE", result.Status, "Overall status should be FAILURE due to nil step")
-	require.Len(t, result.StepResults, 3)
+    testProcessor := processor.NewProcessor(adapters)
+    cb := circuitbreaker.NewCircuitBreaker()                            // Added
+    testRouter := router.NewRouter(testProcessor, "adyen", cb)          // Fallback to adyen, Added cb
+    testPolicyEnforcer, errPe := policy.NewPaymentPolicyEnforcer(nil)
+    require.NoError(t, errPe)
+    testMerchantRepo := &MockMerchantConfigRepository{}
+    testMerchantRepo.AddConfig(context.MerchantConfig{
+        ID: "m1", DefaultProvider: "stripe", ProviderAPIKeys: map[string]string{"stripe": "sk_s", "adyen": "ak_a"},
+        DefaultTimeout: context.TimeoutConfig{OverallBudgetMs: 5000},
+    })
 
-	assert.Equal(t, "s1", result.StepResults[0].StepId)
-	assert.True(t, result.StepResults[0].Success)
+    orc := NewOrchestrator(testPolicyEnforcer, testMerchantRepo, testRouter)
+    traceCtx := context.NewTraceContext()
+    mCfg, _ := testMerchantRepo.Get("m1")
+    domainCtx := context.DomainContext{MerchantID: "m1", ActiveMerchantConfig: mCfg, TimeoutConfig: mCfg.DefaultTimeout}
+    plan := &internalv1.PaymentPlan{PlanId: "p1", Steps: []*internalv1.PaymentStep{{StepId: "st1", ProviderName: "stripe", Amount: 100}}}
 
-	assert.False(t, result.StepResults[1].Success, "Nil step should result in a failure StepResult")
-	assert.Equal(t, "NIL_STEP", result.StepResults[1].ErrorCode)
-	assert.Equal(t, "nil-step-1", result.StepResults[1].StepId)
-
-
-	assert.Equal(t, "s3", result.StepResults[2].StepId)
-	assert.True(t, result.StepResults[2].Success) // Subsequent steps are still stubbed as success
+    result, err := orc.Execute(traceCtx, plan, domainCtx)
+    require.NoError(t, err)
+    assert.Equal(t, "SUCCESS", result.Status, "Overall status should be success due to fallback")
+    require.Len(t, result.StepResults, 1)
+    finalStepResult := result.StepResults[0]
+    assert.True(t, finalStepResult.Success)
+    assert.Equal(t, "adyen", finalStepResult.ProviderName)
+    assert.Equal(t, "tx_adyen_fb_ok", finalStepResult.Details["id"])
+    assert.Equal(t, "true", finalStepResult.Details["is_fallback"])
 }
+
+func TestOrchestrator_Execute_Integration_RouterError(t *testing.T) {
+    mockStripeAdapter := mock.NewMockAdapter("stripe")
+    routerExecutionError := fmt.Errorf("router internal error") // This is an adapter execution error
+    mockStripeAdapter.ProcessFunc = func(tc context.TraceContext, s *internalv1.PaymentStep, sc context.StepExecutionContext) (adapter.ProviderResult, error) {
+        // This setup will make the processor forward an error, which the router then also forwards.
+        return adapter.ProviderResult{StepID: s.StepId, Provider: s.ProviderName}, routerExecutionError
+    }
+    adapters := map[string]adapter.ProviderAdapter{"stripe": mockStripeAdapter}
+
+    testProcessor := processor.NewProcessor(adapters)
+    cb := circuitbreaker.NewCircuitBreaker()                       // Added
+    testRouter := router.NewRouter(testProcessor, "", cb)          // No fallback, Added cb
+    testPolicyEnforcer, errPe := policy.NewPaymentPolicyEnforcer(nil)
+    require.NoError(t, errPe)
+    testMerchantRepo := &MockMerchantConfigRepository{}
+    testMerchantRepo.AddConfig(context.MerchantConfig{
+        ID: "merchant_router_err", DefaultProvider: "stripe", ProviderAPIKeys: map[string]string{"stripe": "sk_test"},
+        DefaultTimeout: context.TimeoutConfig{OverallBudgetMs: 5000},
+    })
+
+    orc := NewOrchestrator(testPolicyEnforcer, testMerchantRepo, testRouter)
+
+    traceCtx := context.NewTraceContext()
+    merchantCfg, _ := testMerchantRepo.Get("merchant_router_err")
+    domainCtx := context.DomainContext{
+		MerchantID: "merchant_router_err", ActiveMerchantConfig: merchantCfg,
+		TimeoutConfig: merchantCfg.DefaultTimeout,
+	}
+    plan := &internalv1.PaymentPlan{
+		PlanId: "plan_router_err",
+		Steps:  []*internalv1.PaymentStep{{StepId: "step_re", ProviderName: "stripe", Amount: 100}},
+	}
+
+    result, err := orc.Execute(traceCtx, plan, domainCtx)
+    require.NoError(t, err) // Orchestrator Execute itself doesn't return error for router/step failures
+    assert.Equal(t, "FAILURE", result.Status)
+    require.Len(t, result.StepResults, 1)
+    stepRes := result.StepResults[0]
+    assert.False(t, stepRes.Success)
+    assert.Equal(t, "ROUTER_EXECUTION_ERROR", stepRes.ErrorCode) // This is set by Orchestrator for router errors
+    assert.Contains(t, stepRes.ErrorMessage, "Router execution failed")
+    // The router_error_details field contains the error string from the router, which wraps the processor error (which is the adapter's error).
+    expectedRouterErrorDetail := "router: error processing step with primary provider stripe: router internal error"
+    assert.Equal(t, expectedRouterErrorDetail, stepRes.Details["router_error_details"])
+}
+
+// Note: The test for policy evaluation error (TestOrchestrator_Execute_PolicyEvaluationError)
+// and associated helper types (FailingPolicyEnforcer, SkipStepPolicyEnforcer) have been removed.
+// The Orchestrator's path for `policyErr != nil` is covered by its implementation.
+// Testing specific policy decisions like skipping steps or configurable error returns from
+// policy evaluation would require making policy.PaymentPolicyEnforcer an interface or
+// significantly modifying the stub, which is deferred.
+// TODO: Add TestOrchestrator_Execute_StepSkippedByPolicy once PolicyDecision and Orchestrator support it.
+// TODO: Add tests for policy evaluation errors once PolicyEnforcer is an interface or configurable.

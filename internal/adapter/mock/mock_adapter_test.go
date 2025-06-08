@@ -38,7 +38,8 @@ func TestMockAdapter_Process_DefaultBehavior(t *testing.T) {
 	assert.True(t, result.Success)
 	assert.Equal(t, "step-123", result.StepID)
 	assert.Equal(t, "default_mock", result.Provider)
-	assert.NotEmpty(t, result.TransactionID)
+	assert.NotEmpty(t, result.Details["provider_transaction_id"]) // Check Details map
+	assert.Empty(t, result.TransactionID) // Top-level field should be empty by default
 	assert.True(t, result.LatencyMs >= 0)
 	assert.Equal(t, "true", result.Details["mock_processed"])
 }

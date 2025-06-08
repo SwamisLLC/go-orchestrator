@@ -68,8 +68,10 @@ func TestDeriveStepContext(t *testing.T) {
 	}
 	overallTimeout := domainCtx.TimeoutConfig.OverallBudgetMs
 	startTimeForDomain := time.Now().Add(-1 * time.Second) // Pretend domain context was created 1 sec ago
+	dummyAmount := int64(12345)
+	dummyCurrency := "USD"
 
-	stepCtx := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, startTimeForDomain)
+	stepCtx := DeriveStepContext(traceCtx, domainCtx, "stripe", dummyAmount, dummyCurrency, overallTimeout, startTimeForDomain)
 
 	assert.Equal(t, traceCtx.TraceID, stepCtx.TraceID)
 	assert.NotEmpty(t, stepCtx.SpanID)
@@ -82,12 +84,12 @@ func TestDeriveStepContext(t *testing.T) {
 
 	// Test with budget nearly exhausted
 	almostExhaustedStartTime := time.Now().Add(-time.Duration(overallTimeout-100) * time.Millisecond)
-	stepCtxExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, almostExhaustedStartTime)
+	stepCtxExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", dummyAmount, dummyCurrency, overallTimeout, almostExhaustedStartTime)
 	assert.True(t, stepCtxExhausted.RemainingBudgetMs > 0 && stepCtxExhausted.RemainingBudgetMs <= 100, "Remaining budget should be small but positive")
 
 	// Test with budget fully exhausted
 	fullyExhaustedStartTime := time.Now().Add(-time.Duration(overallTimeout+100) * time.Millisecond)
-	stepCtxFullyExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, fullyExhaustedStartTime)
+	stepCtxFullyExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", dummyAmount, dummyCurrency, overallTimeout, fullyExhaustedStartTime)
 	assert.Equal(t, int64(0), stepCtxFullyExhausted.RemainingBudgetMs, "Remaining budget should be zero if overdue")
 }
 

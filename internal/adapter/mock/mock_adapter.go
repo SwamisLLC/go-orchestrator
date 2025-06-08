@@ -1,9 +1,9 @@
 package mock
 
 import (
-	// "fmt" // Removed
+	// "fmt" // Removed as no longer needed after logging removal
 	"time"
-	stdcontext "context" // Added standard context
+	stdcontext "context"
 
 	"github.com/yourorg/payment-orchestrator/internal/adapter"
 	"github.com/yourorg/payment-orchestrator/internal/context"
@@ -15,7 +15,7 @@ import (
 type MockAdapter struct {
 	Name          string
 	ProcessFunc   func(tc context.TraceContext, step *internalv1.PaymentStep, sc context.StepExecutionContext) (adapter.ProviderResult, error)
-	HealthCheckFunc func(ctx stdcontext.Context) error // Note: Using context.Context here for future, but might need to be context.TraceContext or similar if not using std context
+	HealthCheckFunc func(ctx stdcontext.Context) error
 }
 
 // NewMockAdapter creates a new MockAdapter.
@@ -36,20 +36,20 @@ func (m *MockAdapter) Process(
 
 	// Default behavior: success
 	latency := time.Since(sc.StartTime).Milliseconds()
-	if latency == 0 && step.Amount > 0 { // Ensure some latency if not set by StartTime properly
-	    time.Sleep(10 * time.Millisecond) // simulate some work
+	if latency == 0 && step.Amount > 0 {
+	    time.Sleep(10 * time.Millisecond)
 	    latency = time.Since(sc.StartTime).Milliseconds()
 	}
 
-
-	return adapter.ProviderResult{
+	res := adapter.ProviderResult{
 		StepID:        step.StepId,
 		Success:       true,
 		Provider:      m.Name,
-		TransactionID: uuid.NewString(),
+		TransactionID: "",
 		LatencyMs:     latency,
-		Details:       map[string]string{"mock_processed": "true"},
-	}, nil
+		Details:       map[string]string{"mock_processed": "true", "provider_transaction_id": uuid.NewString()},
+	}
+	return res, nil
 }
 
 // GetName implements the ProviderAdapter interface.
@@ -59,7 +59,7 @@ func (m *MockAdapter) GetName() string {
 
 // HealthCheck implements an optional part of a ProviderAdapter interface.
 // For the mock, it calls HealthCheckFunc if provided.
-// func (m *MockAdapter) HealthCheck(ctx context.Context) error { // Standard Go context.Context
+// func (m *MockAdapter) HealthCheck(ctx stdcontext.Context) error {
 // 	if m.HealthCheckFunc != nil {
 // 		return m.HealthCheckFunc(ctx)
 // 	}
