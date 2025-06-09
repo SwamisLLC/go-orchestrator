@@ -23,6 +23,7 @@ type ProviderResult struct {
 	TransactionID string            // Transaction ID from the provider, if successful
 	LatencyMs     int64             // Latency of the call to the provider
 	RawResponse   []byte            // Raw response body from the provider (for debugging/logging)
+	HTTPStatus    int               // HTTP status code from the provider's response
 	Details       map[string]string // Any other relevant details from the provider
 }
 
