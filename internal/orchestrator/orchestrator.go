@@ -87,7 +87,9 @@ func (o *Orchestrator) Execute(
 		    continue
 		}
 
-		stepCtx := context.DeriveStepContext(traceCtx, domainCtx, step.ProviderName, domainCtx.TimeoutConfig.OverallBudgetMs, startTime)
+		// Assuming this is the first attempt for any step, as Orchestrator doesn't have retry logic yet.
+		attemptNumber := 1
+		stepCtx := context.DeriveStepContext(traceCtx, domainCtx, step.ProviderName, domainCtx.TimeoutConfig.OverallBudgetMs, startTime, attemptNumber)
 
 		currentStepResult, currentStepErr := o.router.ExecuteStep(stepCtx, step)
 
@@ -128,7 +130,8 @@ func (o *Orchestrator) Execute(
 
 		// Policy Evaluation on currentStepResult
 		log.Printf("Orchestrator: Evaluating policy for StepID %s, Success: %t", step.GetStepId(), currentStepResult.GetSuccess())
-		allowRetry, policyErr := o.policyEnforcer.Evaluate(stepCtx, step, currentStepResult)
+		// Pass domainCtx to Evaluate as per the updated signature in policy.go
+		allowRetry, policyErr := o.policyEnforcer.Evaluate(domainCtx, stepCtx, step, currentStepResult)
 
 		if policyErr != nil {
 			log.Printf("Orchestrator: Error evaluating policy for StepID %s: %v", step.GetStepId(), policyErr)
