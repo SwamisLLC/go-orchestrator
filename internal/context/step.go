@@ -18,11 +18,12 @@ type StepExecutionContext struct {
 	RemainingBudgetMs   int64       // How many ms remain before overall SLA expires
 	StepRetryPolicy     RetryPolicy // Subset of DomainContext.RetryPolicy, possibly modified
 	ProviderCredentials Credentials // API key or token for the specific payment provider
+	AttemptNumber       int         // Which attempt this is (1 for first, 2 for second, etc.)
 	// any other per-step fields needed by Router/Adapter
 }
 
 // DeriveStepContext creates a StepExecutionContext from broader contexts.
-func DeriveStepContext(tc TraceContext, dc DomainContext, providerName string, overallTimeoutBudgetMs int64, startTime time.Time) StepExecutionContext {
+func DeriveStepContext(tc TraceContext, dc DomainContext, providerName string, overallTimeoutBudgetMs int64, startTime time.Time, attemptNumber int) StepExecutionContext {
 	// Calculate remaining budget based on overall budget and time elapsed since domain context creation.
 	// This is a simplified calculation. A more robust one would track elapsed time more accurately.
 	elapsedMs := time.Since(startTime).Milliseconds()
@@ -40,5 +41,6 @@ func DeriveStepContext(tc TraceContext, dc DomainContext, providerName string, o
 		ProviderCredentials: Credentials{
 			APIKey: dc.GetProviderAPIKey(providerName),
 		},
+		AttemptNumber:     attemptNumber,
 	}
 }
