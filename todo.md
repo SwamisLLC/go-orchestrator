@@ -119,9 +119,9 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 11: StripeAdapter (Simple Implementation)
 
 18. **StripeAdapter**  
-    - [ ] Create `internal/adapter/stripe/stripe_adapter.go` with HTTP calls and retry logic.  
-    - [ ] Implement helpers: `buildStripePayload()`, `generateIdempotencyKey()`.  
-    - [ ] Write tests in `internal/adapter/stripe/stripe_adapter_test.go` using `httptest.Server`.
+    - [☑] Create `internal/adapter/stripe/stripe_adapter.go` with HTTP calls and retry logic.
+    - [☑] Implement helpers: `buildStripePayload()`, `generateIdempotencyKey()`.
+    - [☑] Write tests in `internal/adapter/stripe/stripe_adapter_test.go` using `httptest.Server`.
 
 ---
 
