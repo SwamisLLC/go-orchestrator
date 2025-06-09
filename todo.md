@@ -128,13 +128,13 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 12: Router (Full Features)
 
 19. **Circuit-Breaker Service**  
-    - [ ] Create `internal/router/circuitbreaker/circuitbreaker.go` with basic in-memory logic.  
-    - [ ] Write tests in `internal/router/circuitbreaker/circuitbreaker_test.go`.  
+    - [☑] Create `internal/router/circuitbreaker/circuitbreaker.go` with basic in-memory logic.
+    - [☑] Write tests in `internal/router/circuitbreaker/circuitbreaker_test.go`.
 
 20. **Router Enhancements**  
-    - [ ] Update `internal/router/router.go` to integrate `CircuitBreakerService` and SLA budget enforcement.  
-    - [ ] Implement `tryFallback()` helper for marking unhealthy and skipping providers.  
-    - [ ] Write full-feature tests in `internal/router/router_full_test.go`, covering circuit-breaking, SLA expiration, and health checks.
+    - [☑] Update `internal/router/router.go` to integrate `CircuitBreakerService` and SLA budget enforcement.
+    - [☑] Implement `tryFallback()` helper for marking unhealthy and skipping providers.
+    - [☑] Write full-feature tests in `internal/router/router_full_test.go`, covering circuit-breaking, SLA expiration, and health checks.
 
 ---
 
