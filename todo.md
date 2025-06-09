@@ -150,9 +150,9 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 14: PaymentPolicyEnforcer (Full DSL)
 
 22. **DSL-Based Policy Engine**  
-    - [ ] Update `internal/policy/policy.go` to use `govaluate`: compile rule expressions in `NewPolicyEnforcer(rules)`.  
-    - [ ] Modify `Evaluate()` to run each compiled expression against `StepExecutionContext` variables (`fraudScore`, `region`, `amount`, `merchantTier`).  
-    - [ ] Write tests in `internal/policy/policy_test.go` for rule evaluation (e.g., `"fraudScore > 0.8"`).
+    - [☑] Update `internal/policy/policy.go` to use `govaluate`: compile rule expressions in `NewPolicyEnforcer(rules)`.
+    - [☑] Modify `Evaluate()` to run each compiled expression against `StepExecutionContext` variables (`fraudScore`, `region`, `amount`, `merchantTier`).
+    - [☑] Write tests in `internal/policy/policy_test.go` for rule evaluation (e.g., `"fraudScore > 0.8"`).
 
 ---
 
