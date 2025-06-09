@@ -2,22 +2,24 @@ package router
 
 import (
 	"fmt"
-	"log" // Using standard log for now
+	"log"
 
 	"github.com/yourorg/payment-orchestrator/internal/adapter"
 	"github.com/yourorg/payment-orchestrator/internal/context"
-	// "github.com/yourorg/payment-orchestrator/internal/processor" // Not directly used by router struct, but by ProcessorInterface
+	"github.com/yourorg/payment-orchestrator/internal/router/circuitbreaker"
 	orchestratorinternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 )
+
+const defaultMinRequiredBudgetMs int64 = 50 // milliseconds
 
 // RouterConfig holds the configuration for the router's provider selection logic.
 type RouterConfig struct {
 	PrimaryProviderName  string
 	FallbackProviderName string
+	// MinRequiredBudgetMs int64 // Optional: to make it configurable per router instance
 }
 
 // ProcessorInterface defines the contract for processing a single payment step.
-// This allows for mocking the processor in router tests.
 type ProcessorInterface interface {
 	ProcessSingleStep(
 		ctx context.StepExecutionContext,
@@ -27,12 +29,11 @@ type ProcessorInterface interface {
 }
 
 // Router is responsible for selecting a payment provider and executing a payment step.
-// It currently implements a simple primary/fallback logic.
 type Router struct {
 	processor ProcessorInterface
 	adapters  map[string]adapter.ProviderAdapter
 	config    RouterConfig
-	// logger    *log.Logger // Example for a more structured logger
+	cb        *circuitbreaker.CircuitBreaker
 }
 
 // NewRouter creates a new Router instance.
@@ -40,72 +41,163 @@ func NewRouter(
 	processor ProcessorInterface,
 	adapters map[string]adapter.ProviderAdapter,
 	config RouterConfig,
-) *Router {
+	cb *circuitbreaker.CircuitBreaker,
+) (*Router, error) {
+	if processor == nil {
+		return nil, fmt.Errorf("processor cannot be nil")
+	}
+	if adapters == nil {
+		return nil, fmt.Errorf("adapters map cannot be nil")
+	}
+	if cb == nil {
+		return nil, fmt.Errorf("circuit breaker cannot be nil")
+	}
+	if config.PrimaryProviderName == "" {
+		return nil, fmt.Errorf("primary provider name in config cannot be empty")
+	}
 	return &Router{
 		processor: processor,
 		adapters:  adapters,
 		config:    config,
-	}
+		cb:        cb,
+	}, nil
 }
 
-// ExecuteStep attempts to process a payment step using a primary provider,
-// and falls back to a secondary provider if the primary attempt fails.
-func (r *Router) ExecuteStep(
-	ctx context.StepExecutionContext,
-	step *orchestratorinternalv1.PaymentStep,
-) (*orchestratorinternalv1.StepResult, error) {
-	log.Printf("Router: Starting ExecuteStep for StepID: %s, Original Provider in Step: %s", step.GetStepId(), step.GetProviderName())
+func (r *Router) ExecuteStep(ctx context.StepExecutionContext, step *orchestratorinternalv1.PaymentStep) (*orchestratorinternalv1.StepResult, error) {
+	log.Printf("Router.ExecuteStep: Processing step %s with primary provider %s. Budget: %dms", step.GetStepId(), r.config.PrimaryProviderName, ctx.RemainingBudgetMs)
 
-	// Attempt with Primary Provider
+	minBudget := defaultMinRequiredBudgetMs
+
+	if ctx.RemainingBudgetMs < minBudget {
+		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for primary provider %s, minimum required %dms", ctx.RemainingBudgetMs, r.config.PrimaryProviderName, minBudget)
+		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
+		primaryResultForFallback := &orchestratorinternalv1.StepResult{
+			StepId:       step.GetStepId(),
+			Success:      false,
+			ErrorCode:    "SLA_BUDGET_EXCEEDED",
+			ErrorMessage: errMsg,
+			ProviderName: r.config.PrimaryProviderName,
+		}
+		return r.tryFallback(ctx, step, primaryResultForFallback, nil)
+	}
+
 	primaryAdapter, ok := r.adapters[r.config.PrimaryProviderName]
 	if !ok {
-		err := fmt.Errorf("router: primary provider adapter '%s' not found", r.config.PrimaryProviderName)
-		log.Printf("Router: Error - %v", err)
-		// Return a StepResult indicating failure due to configuration error
+		errMsg := fmt.Sprintf("primary provider adapter '%s' not found", r.config.PrimaryProviderName)
+		log.Printf("Router.ExecuteStep: Error: %s", errMsg)
 		return &orchestratorinternalv1.StepResult{
 			StepId:       step.GetStepId(),
 			Success:      false,
-			ProviderName: r.config.PrimaryProviderName, // The one we attempted to use
 			ErrorCode:    "ROUTER_CONFIGURATION_ERROR",
-			ErrorMessage: err.Error(),
-		}, err
+			ErrorMessage: errMsg,
+			ProviderName: r.config.PrimaryProviderName,
+		}, fmt.Errorf(errMsg)
 	}
 
-	log.Printf("Router: Attempting StepID %s with primary provider: %s", step.GetStepId(), r.config.PrimaryProviderName)
-	// Update step's provider name to reflect the one being used by the router for this attempt
-	// This is important if the original step.ProviderName was a generic hint or empty.
-	// However, the processor will also set ProviderName in the result based on the adapter it used.
-	// For clarity, we can log which provider the router *intends* to use.
-	// The actual step.ProviderName field might be more of an input preference.
-	// Let's assume the processor correctly sets ProviderName in the StepResult.
-
-	result, err := r.processor.ProcessSingleStep(ctx, step, primaryAdapter)
-
-	if err != nil || (result != nil && !result.GetSuccess()) {
-		log.Printf("Router: Primary provider %s failed for StepID %s. Error: %v, ResultSuccess: %t. Attempting fallback.",
-			r.config.PrimaryProviderName, step.GetStepId(), err, result != nil && result.GetSuccess())
-
-		fallbackAdapter, ok := r.adapters[r.config.FallbackProviderName]
-		if !ok {
-			fallbackErr := fmt.Errorf("router: fallback provider adapter '%s' not found", r.config.FallbackProviderName)
-			log.Printf("Router: Error - %v", fallbackErr)
-			// Return a StepResult indicating failure due to configuration error
-			// We return the original error/result from primary if that's more informative,
-			// or this new configuration error. The spec implies returning the fallback's outcome.
-			// If primary failed and fallback config is missing, this is a critical router/config issue.
-			return &orchestratorinternalv1.StepResult{
-				StepId:       step.GetStepId(),
-				Success:      false,
-				ProviderName: r.config.FallbackProviderName, // The one we attempted to use
-				ErrorCode:    "ROUTER_CONFIGURATION_ERROR",
-				ErrorMessage: fallbackErr.Error(),
-			}, fallbackErr // Return the fallback config error
+	if !r.cb.AllowRequest(r.config.PrimaryProviderName) {
+		errMsg := fmt.Sprintf("circuit open for primary provider %s", r.config.PrimaryProviderName)
+		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
+		primaryResultForFallback := &orchestratorinternalv1.StepResult{
+			StepId:       step.GetStepId(),
+			Success:      false,
+			ErrorCode:    "CIRCUIT_OPEN",
+			ErrorMessage: errMsg,
+			ProviderName: r.config.PrimaryProviderName,
 		}
-
-		log.Printf("Router: Attempting StepID %s with fallback provider: %s", step.GetStepId(), r.config.FallbackProviderName)
-		return r.processor.ProcessSingleStep(ctx, step, fallbackAdapter)
+		return r.tryFallback(ctx, step, primaryResultForFallback, nil)
 	}
 
-	log.Printf("Router: Primary provider %s succeeded for StepID %s.", r.config.PrimaryProviderName, step.GetStepId())
-	return result, err
+	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(ctx, step, primaryAdapter)
+
+	if primaryStepResult == nil {
+		if primaryErr != nil {
+			 primaryStepResult = &orchestratorinternalv1.StepResult{StepId: step.GetStepId(), Success: false, ErrorCode: "PROCESSOR_ERROR", ErrorMessage: primaryErr.Error(), ProviderName: r.config.PrimaryProviderName}
+		} else {
+			 primaryStepResult = &orchestratorinternalv1.StepResult{StepId: step.GetStepId(), Success: false, ErrorCode: "UNKNOWN_PROCESSOR_FAILURE", ErrorMessage: "Processor returned nil result and nil error", ProviderName: r.config.PrimaryProviderName}
+		}
+	}
+	primaryStepResult.ProviderName = r.config.PrimaryProviderName
+
+	if primaryErr != nil || !primaryStepResult.Success {
+		log.Printf("Router.ExecuteStep: Primary provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure and attempting fallback.", r.config.PrimaryProviderName, step.GetStepId(), primaryErr, primaryStepResult.Success)
+		r.cb.RecordFailure(r.config.PrimaryProviderName)
+		return r.tryFallback(ctx, step, primaryStepResult, primaryErr)
+	}
+
+	log.Printf("Router.ExecuteStep: Primary provider %s succeeded for step %s. Recording success.", r.config.PrimaryProviderName, step.GetStepId())
+	r.cb.RecordSuccess(r.config.PrimaryProviderName)
+	return primaryStepResult, nil
+}
+
+func (r *Router) tryFallback(ctx context.StepExecutionContext, step *orchestratorinternalv1.PaymentStep, primaryResult *orchestratorinternalv1.StepResult, primaryError error) (*orchestratorinternalv1.StepResult, error) {
+	if r.config.FallbackProviderName == "" {
+		log.Printf("Router.tryFallback: No fallback provider configured for step %s. Returning primary result.", step.GetStepId())
+		return primaryResult, primaryError
+	}
+
+	log.Printf("Router.tryFallback: Attempting fallback with provider %s for step %s. Budget: %dms", r.config.FallbackProviderName, step.GetStepId(), ctx.RemainingBudgetMs)
+
+	minBudget := defaultMinRequiredBudgetMs
+
+	if ctx.RemainingBudgetMs < minBudget {
+		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for fallback provider %s, minimum required %dms", ctx.RemainingBudgetMs, r.config.FallbackProviderName, minBudget)
+		log.Printf("Router.tryFallback: %s. Returning primary result.", errMsg)
+		if primaryError == nil && primaryResult != nil {
+			primaryResult.ErrorMessage = fmt.Sprintf("Primary Result (Code: %s, Msg: %s); Fallback Skipped (SLA): %s",
+				primaryResult.GetErrorCode(), primaryResult.GetErrorMessage(), errMsg)
+			if primaryResult.ErrorCode == "CIRCUIT_OPEN" || primaryResult.ErrorCode == "SLA_BUDGET_EXCEEDED" {
+				primaryResult.ErrorCode = "ALL_PROVIDERS_UNAVAILABLE"
+			}
+		}
+		return primaryResult, primaryError
+	}
+
+	fallbackAdapter, ok := r.adapters[r.config.FallbackProviderName]
+	if !ok {
+		errMsg := fmt.Sprintf("fallback provider adapter '%s' not found", r.config.FallbackProviderName)
+		log.Printf("Router.tryFallback: Error: %s. Modifying primary result to reflect this.", errMsg)
+
+		originalPrimaryErrorCode := primaryResult.GetErrorCode()
+		originalPrimaryErrorMsg := primaryResult.GetErrorMessage()
+
+		primaryResult.Success = false
+		primaryResult.ErrorCode = "ROUTER_CONFIGURATION_ERROR"
+		primaryResult.ErrorMessage = fmt.Sprintf("Primary Failure (Code: %s, Msg: %s); Fallback Attempt Failed: %s",
+			originalPrimaryErrorCode, originalPrimaryErrorMsg, errMsg)
+
+		if primaryError == nil {
+			return primaryResult, fmt.Errorf(errMsg)
+		}
+		return primaryResult, primaryError
+	}
+
+	if !r.cb.AllowRequest(r.config.FallbackProviderName) {
+		errMsg := fmt.Sprintf("circuit open for fallback provider %s", r.config.FallbackProviderName)
+		log.Printf("Router.tryFallback: %s. Returning primary result.", errMsg)
+		primaryResult.ErrorMessage = fmt.Sprintf("Primary Error: [%s]; Fallback Circuit Open: [%s]", primaryResult.ErrorMessage, errMsg)
+		if primaryResult.ErrorCode == "CIRCUIT_OPEN" || primaryResult.ErrorCode == "SLA_BUDGET_EXCEEDED" {
+		    primaryResult.ErrorCode = "ALL_PROVIDERS_UNAVAILABLE"
+        }
+		return primaryResult, primaryError
+	}
+
+	fallbackStepResult, fallbackErr := r.processor.ProcessSingleStep(ctx, step, fallbackAdapter)
+
+	if fallbackStepResult == nil {
+		if fallbackErr != nil {
+			fallbackStepResult = &orchestratorinternalv1.StepResult{StepId: step.GetStepId(), Success: false, ErrorCode: "PROCESSOR_ERROR", ErrorMessage: fallbackErr.Error(), ProviderName: r.config.FallbackProviderName}
+		} else {
+			fallbackStepResult = &orchestratorinternalv1.StepResult{StepId: step.GetStepId(), Success: false, ErrorCode: "UNKNOWN_PROCESSOR_FAILURE", ErrorMessage: "Processor returned nil result and nil error", ProviderName: r.config.FallbackProviderName}
+		}
+	}
+	fallbackStepResult.ProviderName = r.config.FallbackProviderName
+
+	if fallbackErr != nil || !fallbackStepResult.Success {
+		log.Printf("Router.tryFallback: Fallback provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure.", r.config.FallbackProviderName, step.GetStepId(), fallbackErr, fallbackStepResult.Success)
+		r.cb.RecordFailure(r.config.FallbackProviderName)
+	} else {
+		log.Printf("Router.tryFallback: Fallback provider %s succeeded for step %s. Recording success.", r.config.FallbackProviderName, step.GetStepId())
+		r.cb.RecordSuccess(r.config.FallbackProviderName)
+	}
+	return fallbackStepResult, fallbackErr
 }
