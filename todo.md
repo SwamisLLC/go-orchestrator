@@ -94,16 +94,16 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 8: Processor Layer
 
 15. **Processor Implementation**  
-    - [ ] Create `internal/processor/processor.go` with `Processor.ProcessSingleStep()`, wrapping `ProviderAdapter`.  
-    - [ ] Write tests in `internal/processor/processor_test.go`.
+    - [☑] Create `internal/processor/processor.go` with `Processor.ProcessSingleStep()`, wrapping `ProviderAdapter`.
+    - [☑] Write tests in `internal/processor/processor_test.go`.
 
 ---
 
 ## Chunk 9: Router (Minimal Fallback)
 
 16. **Router Skeleton**  
-    - [ ] Create `internal/router/router.go` with simple fallback logic (primary + fallback chain).  
-    - [ ] Write tests in `internal/router/router_test.go`.
+    - [☑] Create `internal/router/router.go` with simple fallback logic (primary + fallback chain).
+    - [☑] Write tests in `internal/router/router_test.go`.
 
 ---
 
