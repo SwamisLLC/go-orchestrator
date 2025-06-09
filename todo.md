@@ -110,9 +110,9 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 10: Orchestrator (Integrate Router & Policy)
 
 17. **Orchestrator Integration**  
-    - [ ] Update `internal/orchestrator/orchestrator.go` to call `Router.ExecuteStep()` and respect policy.  
-    - [ ] Modify `NewOrchestrator()` to accept a `Router`.  
-    - [ ] Write integration tests in `internal/orchestrator/orchestrator_integration_test.go`.
+    - [☑] Update `internal/orchestrator/orchestrator.go` to call `Router.ExecuteStep()` and respect policy.
+    - [☑] Modify `NewOrchestrator()` to accept a `Router`.
+    - [☑] Write integration tests in `internal/orchestrator/orchestrator_integration_test.go`.
 
 ---
 
