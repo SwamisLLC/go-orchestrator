@@ -141,9 +141,9 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 13: CompositePaymentService (Full Optimizer)
 
 21. **Simple Optimizer Logic**  
-    - [ ] Update `internal/planbuilder/optimizer.go` to split amounts (e.g., equal split).  
-    - [ ] Write tests in `internal/planbuilder/optimizer_test.go` for fee-splitting logic.  
-    - [ ] Integrate real optimizer into `PlanBuilder.Build()` so that if metadata indicates a split, it’s applied.
+    - [☑] Update `internal/planbuilder/composite.go` to split amounts (e.g., equal split). *(Note: Logic added to `composite.go`)*
+    - [☑] Write tests in `internal/planbuilder/composite_test.go` for fee-splitting logic.
+    - [☑] Integrate real optimizer into `PlanBuilder.Build()` so that if metadata indicates a split, it’s applied. *(Note: Integration confirmed, no changes needed in `planbuilder.go`)*
 
 ---
 
