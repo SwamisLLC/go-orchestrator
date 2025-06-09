@@ -3,13 +3,24 @@ package orchestrator
 import (
 	"fmt"
 	"time"
+	"log" // Added for logging
 
 	"github.com/yourorg/payment-orchestrator/internal/context"
-	"github.com/yourorg/payment-orchestrator/internal/policy"
-	// "github.com/yourorg/payment-orchestrator/internal/router" // Will be needed later
+	// "github.com/yourorg/payment-orchestrator/internal/policy" // Interface will be used
+	// "github.com/yourorg/payment-orchestrator/internal/router" // Interface will be used
 	"github.com/google/uuid"
 	internalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 )
+
+// RouterInterface defines the contract for executing a payment step via a router.
+type RouterInterface interface {
+	ExecuteStep(ctx context.StepExecutionContext, step *internalv1.PaymentStep) (*internalv1.StepResult, error)
+}
+
+// PolicyEnforcerInterface defines the contract for evaluating policies on a step result.
+type PolicyEnforcerInterface interface {
+	Evaluate(ctx context.StepExecutionContext, currentStep *internalv1.PaymentStep, stepResult *internalv1.StepResult) (bool, error) // Returns (allowRetry, error)
+}
 
 // PaymentResult represents the overall result of executing a payment plan.
 type PaymentResult struct {
@@ -21,34 +32,34 @@ type PaymentResult struct {
 
 // Orchestrator manages execution order, high-level policies, and per-step context derivation.
 type Orchestrator struct {
-	// adapterRegistry   map[string]adapter.ProviderAdapter // Will be used by Router
-	policyEnforcer    *policy.PaymentPolicyEnforcer
-	// router            router.Router // Will be integrated later
+	router             RouterInterface
+	policyEnforcer     PolicyEnforcerInterface
 	merchantConfigRepo context.MerchantConfigRepository // For additional merchant-level lookups
 }
 
 // NewOrchestrator creates a new Orchestrator.
-// Dependencies like Router will be added in later chunks.
 func NewOrchestrator(
-	pe *policy.PaymentPolicyEnforcer,
+	r RouterInterface,
+	pe PolicyEnforcerInterface,
 	mcr context.MerchantConfigRepository,
-	// rtr router.Router, // Add when Router is ready
 ) *Orchestrator {
+	if r == nil {
+		panic("Router cannot be nil")
+	}
 	if pe == nil {
 		panic("PolicyEnforcer cannot be nil")
 	}
 	if mcr == nil {
-	    panic("MerchantConfigRepository cannot be nil")
+		panic("MerchantConfigRepository cannot be nil")
 	}
 	return &Orchestrator{
-		policyEnforcer:    pe,
+		router:             r,
+		policyEnforcer:     pe,
 		merchantConfigRepo: mcr,
-		// router: rtr,
 	}
 }
 
 // Execute processes a payment plan.
-// For this placeholder version, it iterates through steps and returns stubbed success StepResults.
 func (o *Orchestrator) Execute(
 	traceCtx context.TraceContext,
 	plan *internalv1.PaymentPlan,
@@ -78,41 +89,70 @@ func (o *Orchestrator) Execute(
 
 		stepCtx := context.DeriveStepContext(traceCtx, domainCtx, step.ProviderName, domainCtx.TimeoutConfig.OverallBudgetMs, startTime)
 
-		// 1. Policy Check (Placeholder - actual policy evaluation will happen here)
-		// policyDecision, err := o.policyEnforcer.Evaluate(domainCtx, step, stepCtx)
-		// if err != nil {
-		//    // Handle error from policy evaluation
-		// }
-		// if policyDecision.SkipStep { /* ... */ }
+		currentStepResult, currentStepErr := o.router.ExecuteStep(stepCtx, step)
 
-		// 2. Execute Step via Router (Placeholder - actual call to router.ExecuteStep will be here)
-		// For now, create a stub success StepResult.
-		latency := time.Since(stepCtx.StartTime).Milliseconds()
-		stepResult := &internalv1.StepResult{
-			StepId:       step.StepId,
-			Success:      true, // Stub success
-			ProviderName: step.ProviderName,
-			ErrorCode:    "",
-			LatencyMs:    latency, // Placeholder latency
-			Details:      map[string]string{"stubbed_result": "success"},
+		if currentStepErr != nil {
+			log.Printf("Orchestrator: Error from router for StepID %s: %v", step.GetStepId(), currentStepErr)
+			if currentStepResult == nil { // Router error was critical, no result provided
+				currentStepResult = &internalv1.StepResult{
+					StepId:       step.GetStepId(),
+					Success:      false,
+					ProviderName: step.GetProviderName(), // Or router's attempted provider
+					ErrorCode:    "ORCHESTRATOR_ROUTER_CRITICAL_ERROR",
+					ErrorMessage: currentStepErr.Error(),
+				}
+			} else { // Router provided a result, but also an error
+				currentStepResult.Success = false // Ensure success is false
+				if currentStepResult.ErrorCode == "" {
+					currentStepResult.ErrorCode = "ROUTER_ERROR_WITH_RESULT"
+				}
+				// Preserve router's error message if specific, otherwise use the error object's message
+				if currentStepResult.ErrorMessage == "" && currentStepErr != nil {
+					currentStepResult.ErrorMessage = currentStepErr.Error()
+				}
+			}
+		} else if currentStepResult == nil { // No error, but also no result (bad router behavior)
+			log.Printf("Orchestrator: Nil result and nil error from router for StepID %s (unexpected)", step.GetStepId())
+			currentStepResult = &internalv1.StepResult{
+				StepId:       step.GetStepId(),
+				Success:      false,
+				ProviderName: step.GetProviderName(),
+				ErrorCode:    "ORCHESTRATOR_NIL_ROUTER_RESULT",
+				ErrorMessage: "Router returned nil result and nil error, which is unexpected.",
+			}
+			// Optionally, create an error to signal this unexpected state, though currentStepErr is nil here
+			// currentStepErr = fmt.Errorf("router returned nil result and nil error for step %s", step.GetStepId())
 		}
 
-		// Ensure details map is initialized
-		if stepResult.Details == nil {
-		    stepResult.Details = make(map[string]string)
+		allStepResults = append(allStepResults, currentStepResult)
+
+		// Policy Evaluation on currentStepResult
+		log.Printf("Orchestrator: Evaluating policy for StepID %s, Success: %t", step.GetStepId(), currentStepResult.GetSuccess())
+		allowRetry, policyErr := o.policyEnforcer.Evaluate(stepCtx, step, currentStepResult)
+
+		if policyErr != nil {
+			log.Printf("Orchestrator: Error evaluating policy for StepID %s: %v", step.GetStepId(), policyErr)
+			// Append policy error to existing error message if any, or set it.
+			currentStepResult.ErrorMessage = fmt.Sprintf("OriginalMsg: [%s]; PolicyEvalErr: [%s]", currentStepResult.GetErrorMessage(), policyErr.Error())
+			currentStepResult.Success = false // Policy error implies the step cannot be considered successful in its current state
+			if currentStepResult.ErrorCode == "" {
+				currentStepResult.ErrorCode = "POLICY_EVALUATION_ERROR"
+			}
 		}
 
-
-		allStepResults = append(allStepResults, stepResult)
-
-		// If any step (even stubbed) were to fail, update overallStatus
-		// if !stepResult.Success {
-		// overallStatus = "FAILURE" // Or PARTIAL_SUCCESS depending on policy
-		// }
+		if !currentStepResult.GetSuccess() {
+			overallStatus = "FAILURE" // Mark plan as failed if any step effectively fails
+			if !allowRetry && policyErr == nil { // Only stop if no policy error AND no retry. If policy error, we already logged and marked failure.
+				log.Printf("Orchestrator: StepID %s failed and policy does not allow retry. Stopping plan execution.", step.GetStepId())
+				break // Stop processing further steps
+			} else if policyErr != nil {
+				log.Printf("Orchestrator: StepID %s processing failed due to policy evaluation error. Plan marked as failed.", step.GetStepId())
+				// Decide if to break on policy errors. For now, it continues to collect other step results if any, but overallStatus is FAILURE.
+			} else { // Failed, but retry is allowed (or was allowed before policy error)
+				log.Printf("Orchestrator: StepID %s failed but policy allows retry. (Note: Orchestrator-level retry not yet implemented). Plan marked as failed.", step.GetStepId())
+			}
+		}
 	}
-
-	// In a real scenario, if any step failed, overallStatus would be "FAILURE" or "PARTIAL_SUCCESS"
-	// For this stub, all steps are successful.
 	return PaymentResult{
 		PaymentID:   uuid.NewString(), // Generate a unique ID for this payment execution
 		Status:      overallStatus,
