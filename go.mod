@@ -5,13 +5,21 @@ go 1.22
 toolchain go1.22.2
 
 require (
+	github.com/Knetic/govaluate v3.0.0+incompatible
+	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.3.0
 	github.com/stretchr/testify v1.9.0
+	go.uber.org/zap v1.27.0
 	google.golang.org/protobuf v1.36.6
 )
 
+// Indirect dependencies will be populated by 'go mod tidy'
+// Ensure there are no 'replace' directives for internal packages
+// as these were causing issues and are not standard for intra-module package resolution.
+// The primary issue of Go attempting to fetch local packages remotely
+// and the missing 'internal/processor' package remain the blockers.
+
 require (
-	github.com/Knetic/govaluate v3.0.0+incompatible // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
@@ -19,7 +27,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/gin-gonic/gin v1.10.1 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
@@ -35,6 +42,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
