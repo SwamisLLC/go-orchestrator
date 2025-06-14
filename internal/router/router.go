@@ -22,9 +22,10 @@ type RouterConfig struct {
 // ProcessorInterface defines the contract for processing a single payment step.
 type ProcessorInterface interface {
 	ProcessSingleStep(
-		ctx context.StepExecutionContext,
+		traceCtx context.TraceContext,
+		stepCtx context.StepExecutionContext,
 		step *orchestratorinternalv1.PaymentStep,
-		adapter adapter.ProviderAdapter,
+		selectedAdapter adapter.ProviderAdapter,
 	) (*orchestratorinternalv1.StepResult, error)
 }
 
@@ -63,8 +64,13 @@ func NewRouter(
 	}, nil
 }
 
-func (r *Router) ExecuteStep(ctx context.StepExecutionContext, step *orchestratorinternalv1.PaymentStep) (*orchestratorinternalv1.StepResult, error) {
-	log.Printf("Router.ExecuteStep: Processing step %s with primary provider %s. Budget: %dms", step.GetStepId(), r.config.PrimaryProviderName, ctx.RemainingBudgetMs)
+func (r *Router) ExecuteStep(
+	traceCtx context.TraceContext, // <<<< ADDED traceCtx
+	ctx context.StepExecutionContext,
+	step *orchestratorinternalv1.PaymentStep,
+) (*orchestratorinternalv1.StepResult, error) {
+	log.Printf("Router.ExecuteStep: [%s/%s] Processing step %s with primary provider %s. Budget: %dms",
+		traceCtx.TraceID, traceCtx.SpanID, step.GetStepId(), r.config.PrimaryProviderName, ctx.RemainingBudgetMs)
 
 	minBudget := defaultMinRequiredBudgetMs
 
@@ -78,7 +84,8 @@ func (r *Router) ExecuteStep(ctx context.StepExecutionContext, step *orchestrato
 			ErrorMessage: errMsg,
 			ProviderName: r.config.PrimaryProviderName,
 		}
-		return r.tryFallback(ctx, step, primaryResultForFallback, nil)
+		// ExecuteStep calls tryFallback, traceCtx must be passed here.
+		return r.tryFallback(traceCtx, ctx, step, primaryResultForFallback, nil)
 	}
 
 	primaryAdapter, ok := r.adapters[r.config.PrimaryProviderName]
@@ -104,10 +111,11 @@ func (r *Router) ExecuteStep(ctx context.StepExecutionContext, step *orchestrato
 			ErrorMessage: errMsg,
 			ProviderName: r.config.PrimaryProviderName,
 		}
-		return r.tryFallback(ctx, step, primaryResultForFallback, nil)
+		// ExecuteStep calls tryFallback, traceCtx must be passed here.
+		return r.tryFallback(traceCtx, ctx, step, primaryResultForFallback, nil)
 	}
 
-	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(ctx, step, primaryAdapter)
+	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(traceCtx, ctx, step, primaryAdapter)
 
 	if primaryStepResult == nil {
 		if primaryErr != nil {
@@ -121,21 +129,31 @@ func (r *Router) ExecuteStep(ctx context.StepExecutionContext, step *orchestrato
 	if primaryErr != nil || !primaryStepResult.Success {
 		log.Printf("Router.ExecuteStep: Primary provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure and attempting fallback.", r.config.PrimaryProviderName, step.GetStepId(), primaryErr, primaryStepResult.Success)
 		r.cb.RecordFailure(r.config.PrimaryProviderName)
-		return r.tryFallback(ctx, step, primaryStepResult, primaryErr)
+		// ExecuteStep calls tryFallback, traceCtx must be passed here.
+		return r.tryFallback(traceCtx, ctx, step, primaryStepResult, primaryErr)
 	}
 
-	log.Printf("Router.ExecuteStep: Primary provider %s succeeded for step %s. Recording success.", r.config.PrimaryProviderName, step.GetStepId())
+	log.Printf("Router.ExecuteStep: [%s/%s] Primary provider %s succeeded for step %s. Recording success.",
+		traceCtx.TraceID, traceCtx.SpanID, r.config.PrimaryProviderName, step.GetStepId())
 	r.cb.RecordSuccess(r.config.PrimaryProviderName)
 	return primaryStepResult, nil
 }
 
-func (r *Router) tryFallback(ctx context.StepExecutionContext, step *orchestratorinternalv1.PaymentStep, primaryResult *orchestratorinternalv1.StepResult, primaryError error) (*orchestratorinternalv1.StepResult, error) {
+func (r *Router) tryFallback(
+	traceCtx context.TraceContext, // <<<< ADDED traceCtx
+	ctx context.StepExecutionContext,
+	step *orchestratorinternalv1.PaymentStep,
+	primaryResult *orchestratorinternalv1.StepResult,
+	primaryError error,
+) (*orchestratorinternalv1.StepResult, error) {
 	if r.config.FallbackProviderName == "" {
-		log.Printf("Router.tryFallback: No fallback provider configured for step %s. Returning primary result.", step.GetStepId())
+		log.Printf("Router.tryFallback: [%s/%s] No fallback provider configured for step %s. Returning primary result.",
+			traceCtx.TraceID, traceCtx.SpanID, step.GetStepId())
 		return primaryResult, primaryError
 	}
 
-	log.Printf("Router.tryFallback: Attempting fallback with provider %s for step %s. Budget: %dms", r.config.FallbackProviderName, step.GetStepId(), ctx.RemainingBudgetMs)
+	log.Printf("Router.tryFallback: [%s/%s] Attempting fallback with provider %s for step %s. Budget: %dms",
+		traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId(), ctx.RemainingBudgetMs)
 
 	minBudget := defaultMinRequiredBudgetMs
 
@@ -181,7 +199,7 @@ func (r *Router) tryFallback(ctx context.StepExecutionContext, step *orchestrato
 		return primaryResult, primaryError
 	}
 
-	fallbackStepResult, fallbackErr := r.processor.ProcessSingleStep(ctx, step, fallbackAdapter)
+	fallbackStepResult, fallbackErr := r.processor.ProcessSingleStep(traceCtx, ctx, step, fallbackAdapter)
 
 	if fallbackStepResult == nil {
 		if fallbackErr != nil {
@@ -193,10 +211,12 @@ func (r *Router) tryFallback(ctx context.StepExecutionContext, step *orchestrato
 	fallbackStepResult.ProviderName = r.config.FallbackProviderName
 
 	if fallbackErr != nil || !fallbackStepResult.Success {
-		log.Printf("Router.tryFallback: Fallback provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure.", r.config.FallbackProviderName, step.GetStepId(), fallbackErr, fallbackStepResult.Success)
+		log.Printf("Router.tryFallback: [%s/%s] Fallback provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure.",
+			traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId(), fallbackErr, fallbackStepResult.Success)
 		r.cb.RecordFailure(r.config.FallbackProviderName)
 	} else {
-		log.Printf("Router.tryFallback: Fallback provider %s succeeded for step %s. Recording success.", r.config.FallbackProviderName, step.GetStepId())
+		log.Printf("Router.tryFallback: [%s/%s] Fallback provider %s succeeded for step %s. Recording success.",
+			traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId())
 		r.cb.RecordSuccess(r.config.FallbackProviderName)
 	}
 	return fallbackStepResult, fallbackErr

@@ -11,8 +11,8 @@ import (
 	"github.com/yourorg/payment-orchestrator/internal/planbuilder"
 	"github.com/yourorg/payment-orchestrator/internal/policy"
 	"github.com/yourorg/payment-orchestrator/internal/processor"
-	"github.com/yourorg/payment-orchestrator/internal/provider/adapter"
-	adaptermock "github.com/yourorg/payment-orchestrator/internal/provider/adapter/mock"
+	"github.com/yourorg/payment-orchestrator/internal/adapter" // Corrected path
+	adaptermock "github.com/yourorg/payment-orchestrator/internal/adapter/mock" // Corrected path
 	"github.com/yourorg/payment-orchestrator/internal/router"
 	"github.com/yourorg/payment-orchestrator/internal/router/circuitbreaker"
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
@@ -49,28 +49,33 @@ func processPaymentHandler(c *gin.Context) {
 		DefaultCurrency: req.Currency,
 		ProviderAPIKeys: map[string]string{"mock-primary": "pk_live_mock", "mock-fallback": "fk_live_mock"},
 		UserPrefs:       map[string]string{"merchant_tier": "gold", "split_parts": "1"},
+		DefaultTimeout:  custom_context.TimeoutConfig{OverallBudgetMs: 1000, ProviderTimeoutMs: 600}, // Added positive budget
 	})
 
 	compositeService := planbuilder.NewStubCompositePaymentService()
 	pb := planbuilder.NewPlanBuilder(merchantRepo, compositeService)
 
 	mockPrimaryAdapter := adaptermock.NewMockAdapter("mock-primary")
-	mockPrimaryAdapter.ProcessFunc = func(ctx custom_context.StepExecutionContext, step *protos.PaymentStep) (*protos.StepResult, error) {
-		return &protos.StepResult{
-			StepId:       step.GetStepId(),
-			Success:      true,
-			ProviderName: step.GetProviderName(),
-			Details:      map[string]string{"transaction_id": "txn_mock_" + step.GetProviderName()},
+	mockPrimaryAdapter.ProcessFunc = func(traceCtx custom_context.TraceContext, step *protos.PaymentStep, stepCtx custom_context.StepExecutionContext) (adapter.ProviderResult, error) {
+		// Simulate a successful processing
+		return adapter.ProviderResult{
+			StepID:        step.GetStepId(),
+			Success:       true,
+			Provider:      step.GetProviderName(), // Or mockPrimaryAdapter.GetName()
+			TransactionID: "txn_mock_" + step.GetProviderName(),
+			Details:       map[string]string{"source": "mock_primary_adapter_in_main"},
 		}, nil
 	}
 
 	mockFallbackAdapter := adaptermock.NewMockAdapter("mock-fallback")
-	mockFallbackAdapter.ProcessFunc = func(ctx custom_context.StepExecutionContext, step *protos.PaymentStep) (*protos.StepResult, error) {
-		return &protos.StepResult{
-			StepId:       step.GetStepId(),
-			Success:      true,
-			ProviderName: step.GetProviderName(),
-			Details:      map[string]string{"transaction_id": "txn_mock_" + step.GetProviderName()},
+	mockFallbackAdapter.ProcessFunc = func(traceCtx custom_context.TraceContext, step *protos.PaymentStep, stepCtx custom_context.StepExecutionContext) (adapter.ProviderResult, error) {
+		// Simulate a successful processing
+		return adapter.ProviderResult{
+			StepID:        step.GetStepId(),
+			Success:       true,
+			Provider:      step.GetProviderName(), // Or mockFallbackAdapter.GetName()
+			TransactionID: "txn_mock_" + step.GetProviderName(),
+			Details:       map[string]string{"source": "mock_fallback_adapter_in_main"},
 		}, nil
 	}
 	adaptersMap := map[string]adapter.ProviderAdapter{"mock-primary": mockPrimaryAdapter, "mock-fallback": mockFallbackAdapter}
@@ -96,8 +101,10 @@ func processPaymentHandler(c *gin.Context) {
 	orch := orchestrator.NewOrchestrator(rtr, policyEnforcer, merchantRepo)
 
 	// Build Contexts
-	traceCtx := custom_context.NewTraceContext()
-	domainCtx, err := custom_context.BuildContexts(traceCtx, &req, merchantRepo)
+	// Create a ContextBuilder instance
+	contextBuilder := custom_context.NewContextBuilder(merchantRepo)
+	// Call BuildContexts on the instance, it returns traceCtx as well
+	traceCtx, domainCtx, err := contextBuilder.BuildContexts(&req)
 	if err != nil {
 		log.Printf("Error building contexts: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error building request context: " + err.Error()})

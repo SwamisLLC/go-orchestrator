@@ -6,7 +6,7 @@ import (
 	"log" // Added for logging
 
 	"github.com/yourorg/payment-orchestrator/internal/context"
-	// "github.com/yourorg/payment-orchestrator/internal/policy" // Interface will be used
+	"github.com/yourorg/payment-orchestrator/internal/policy" // Added import for policy.PolicyDecision
 	// "github.com/yourorg/payment-orchestrator/internal/router" // Interface will be used
 	"github.com/google/uuid"
 	internalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
@@ -14,12 +14,18 @@ import (
 
 // RouterInterface defines the contract for executing a payment step via a router.
 type RouterInterface interface {
-	ExecuteStep(ctx context.StepExecutionContext, step *internalv1.PaymentStep) (*internalv1.StepResult, error)
+	ExecuteStep(traceCtx context.TraceContext, ctx context.StepExecutionContext, step *internalv1.PaymentStep) (*internalv1.StepResult, error)
 }
 
 // PolicyEnforcerInterface defines the contract for evaluating policies on a step result.
+// This needs to match the richer signature of policy.PaymentPolicyEnforcer.Evaluate
 type PolicyEnforcerInterface interface {
-	Evaluate(ctx context.StepExecutionContext, currentStep *internalv1.PaymentStep, stepResult *internalv1.StepResult) (bool, error) // Returns (allowRetry, error)
+	Evaluate(
+		domainCtx context.DomainContext,
+		stepCtx context.StepExecutionContext,
+		currentStep *internalv1.PaymentStep,
+		stepResult *internalv1.StepResult,
+	) (policy.PolicyDecision, error) // Updated to return policy.PolicyDecision
 }
 
 // PaymentResult represents the overall result of executing a payment plan.
@@ -91,7 +97,7 @@ func (o *Orchestrator) Execute(
 		attemptNumber := 1
 		stepCtx := context.DeriveStepContext(traceCtx, domainCtx, step.ProviderName, domainCtx.TimeoutConfig.OverallBudgetMs, startTime, attemptNumber)
 
-		currentStepResult, currentStepErr := o.router.ExecuteStep(stepCtx, step)
+		currentStepResult, currentStepErr := o.router.ExecuteStep(traceCtx, stepCtx, step) // Pass traceCtx
 
 		if currentStepErr != nil {
 			log.Printf("Orchestrator: Error from router for StepID %s: %v", step.GetStepId(), currentStepErr)
@@ -130,8 +136,14 @@ func (o *Orchestrator) Execute(
 
 		// Policy Evaluation on currentStepResult
 		log.Printf("Orchestrator: Evaluating policy for StepID %s, Success: %t", step.GetStepId(), currentStepResult.GetSuccess())
-		// Pass domainCtx to Evaluate as per the updated signature in policy.go
-		allowRetry, policyErr := o.policyEnforcer.Evaluate(domainCtx, stepCtx, step, currentStepResult)
+		// Corrected call to Evaluate, removing domainCtx as per build error - REVERTING THIS and using the interface
+		// The interface will now match the concrete type, which includes domainCtx.
+		policyDecision, policyErr := o.policyEnforcer.Evaluate(domainCtx, stepCtx, step, currentStepResult)
+		allowRetry := false // Default to no retry unless policyDecision changes it
+		if policyDecision.AllowRetry { // Check if policyDecision is not nil if it can be
+			allowRetry = true
+		}
+
 
 		if policyErr != nil {
 			log.Printf("Orchestrator: Error evaluating policy for StepID %s: %v", step.GetStepId(), policyErr)
@@ -141,17 +153,31 @@ func (o *Orchestrator) Execute(
 			if currentStepResult.ErrorCode == "" {
 				currentStepResult.ErrorCode = "POLICY_EVALUATION_ERROR"
 			}
+			// Add policy decision details to step result metadata if needed
+			if policyDecision.Reason != "" {
+				if currentStepResult.Details == nil { currentStepResult.Details = make(map[string]string) }
+				currentStepResult.Details["policy_reason"] = policyDecision.Reason
+				currentStepResult.Details["policy_action"] = policyDecision.NextAction
+			}
+		} else { // policyErr is nil, use policyDecision
+			allowRetry = policyDecision.AllowRetry
+			if currentStepResult.Details == nil { currentStepResult.Details = make(map[string]string) }
+			currentStepResult.Details["policy_reason"] = policyDecision.Reason
+			currentStepResult.Details["policy_action"] = policyDecision.NextAction
+			currentStepResult.Details["policy_allow_retry"] = fmt.Sprintf("%t", allowRetry)
+			currentStepResult.Details["policy_skip_fallback"] = fmt.Sprintf("%t", policyDecision.SkipFallback) // useful for router
 		}
+
 
 		if !currentStepResult.GetSuccess() {
 			overallStatus = "FAILURE" // Mark plan as failed if any step effectively fails
-			if !allowRetry && policyErr == nil { // Only stop if no policy error AND no retry. If policy error, we already logged and marked failure.
+			// Use policyDecision.SkipFallback if needed by router logic (not directly here)
+			if !allowRetry && policyErr == nil {
 				log.Printf("Orchestrator: StepID %s failed and policy does not allow retry. Stopping plan execution.", step.GetStepId())
 				break // Stop processing further steps
-			} else if policyErr != nil {
+			} else if policyErr != nil { // Already logged, plan marked as failure
 				log.Printf("Orchestrator: StepID %s processing failed due to policy evaluation error. Plan marked as failed.", step.GetStepId())
-				// Decide if to break on policy errors. For now, it continues to collect other step results if any, but overallStatus is FAILURE.
-			} else { // Failed, but retry is allowed (or was allowed before policy error)
+			} else { // Failed, but retry is allowed
 				log.Printf("Orchestrator: StepID %s failed but policy allows retry. (Note: Orchestrator-level retry not yet implemented). Plan marked as failed.", step.GetStepId())
 			}
 		}

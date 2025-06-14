@@ -160,8 +160,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 
 23. **HTTP Server Setup**  
     - [☑] Create `cmd/server/main.go` using Gin (or similar) with endpoint `POST /process-payment`.
-    - [ ] In handler: bind JSON to `external.ExternalRequest`, validate, call `BuildContexts()`, `PlanBuilder.Build()`, `Orchestrator.Execute()`, return JSON.  
-    - [ ] Write tests in `cmd/server/server_test.go` using `httptest` for valid and invalid payloads.
+    - [☑] In handler: bind JSON to `external.ExternalRequest`, validate, call `BuildContexts()`, `PlanBuilder.Build()`, `Orchestrator.Execute()`, return JSON.
+    - [☑] Write tests in `cmd/server/server_test.go` using `httptest` for valid and invalid payloads.
 
 ---
 

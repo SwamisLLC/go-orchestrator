@@ -23,22 +23,24 @@ func setupTestRouter() *gin.Engine {
 func TestProcessPayment_ValidRequest(t *testing.T) {
 	router := setupTestRouter()
 
-	payload := orchestratorexternalv1.ExternalRequest{
-		MerchantId: "merchant-123",
-		Amount:     1000,
-		Currency:   "USD",
-		PaymentDetails: &orchestratorexternalv1.PaymentDetails{
-			Method: "card",
-			CardDetails: &orchestratorexternalv1.CardDetails{
-				CardNumber: "1234567812345678",
-				ExpiryYear: "2025",
-				ExpiryMonth: "12",
-				Cvv: "123",
+	// Construct payload as a map to ensure correct JSON structure for protobuf oneof
+	payloadMap := map[string]interface{}{
+		"merchant_id": "merchant-123",
+		"amount":      1000,
+		"currency":    "USD",
+		"customer": map[string]interface{}{
+			"name": "cust-abc",
+		},
+		"payment_method": map[string]interface{}{
+			"card": map[string]interface{}{
+				"card_number":  "1234567812345678",
+				"expiry_year":  "2025",
+				"expiry_month": "12",
+				"cvv":          "123",
 			},
 		},
-		CustomerId: "cust-abc",
 	}
-	jsonValue, err := json.Marshal(payload)
+	jsonValue, err := json.Marshal(payloadMap)
 	require.NoError(t, err, "Failed to marshal payload")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
@@ -54,9 +56,9 @@ func TestProcessPayment_ValidRequest(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &responseBody)
 	require.NoError(t, err, "Failed to unmarshal response body")
 
-	assert.NotEmpty(t, responseBody.PaymentId, "PaymentID should not be empty")
-	assert.Equal(t, orchestrator.StatusSuccess, responseBody.Status, "Payment status should be SUCCESS") // Mock adapters always succeed
-	assert.Equal(t, "merchant-123", responseBody.MerchantId, "MerchantID should match request")
+	assert.NotEmpty(t, responseBody.PaymentID, "PaymentID should not be empty")             // Corrected field name
+	assert.Equal(t, "SUCCESS", responseBody.Status, "Payment status should be SUCCESS") // Used string literal
+	// assert.Equal(t, "merchant-123", responseBody.MerchantId, "MerchantID should match request") // Removed, MerchantId not in PaymentResult
 }
 
 func TestProcessPayment_InvalidRequest_BindingError(t *testing.T) {
@@ -127,6 +129,32 @@ func TestProcessPayment_InvalidRequest_ValidationError_InvalidAmount(t *testing.
 	err = json.Unmarshal(w.Body.Bytes(), &errorResponse)
 	require.NoError(t, err, "Failed to unmarshal error response")
 	assert.Contains(t, errorResponse["error"], "Validation failed: Amount must be positive", "Error message mismatch")
+}
+
+func TestProcessPayment_InvalidRequest_ValidationError_MissingCurrency(t *testing.T) {
+	router := setupTestRouter()
+
+	payload := orchestratorexternalv1.ExternalRequest{
+		MerchantId: "merchant-123",
+		Amount:     1000,
+		Currency:   "", // Invalid
+	}
+	jsonValue, err := json.Marshal(payload)
+	require.NoError(t, err, "Failed to marshal payload")
+
+	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
+	require.NoError(t, err, "Failed to create request")
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Status code should be Bad Request")
+
+	var errorResponse gin.H
+	err = json.Unmarshal(w.Body.Bytes(), &errorResponse)
+	require.NoError(t, err, "Failed to unmarshal error response")
+	assert.Contains(t, errorResponse["error"], "Validation failed: Currency is required", "Error message mismatch")
 }
 
 // Optional: TestProcessPayment_OrchestratorError (Simplified: Test for an early 500 due to config)
