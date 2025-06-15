@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExternalRequest",
+  "description": "Schema for an external payment request",
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Unique identifier for the request"
+    },
+    "merchant_id": {
+      "type": "string",
+      "description": "Identifier for the merchant"
+    },
+    "amount": {
+      "type": "integer",
+      "description": "Payment amount in the smallest currency unit (e.g., cents)"
+    },
+    "currency": {
+      "type": "string",
+      "description": "3-letter ISO currency code"
+    },
+    "customer": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" }
+      },
+      "required": ["name", "email"]
+    },
+    "payment_method": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "card": {
+              "type": "object",
+              "properties": {
+                "card_number": { "type": "string" },
+                "expiry_month": { "type": "string" },
+                "expiry_year": { "type": "string" },
+                "cvv": { "type": "string" }
+              },
+              "required": ["card_number", "expiry_month", "expiry_year", "cvv"]
+            }
+          },
+          "required": ["card"]
+        },
+        {
+          "properties": {
+            "wallet": {
+              "type": "object",
+              "properties": {
+                "wallet_type": { "type": "string" },
+                "token": { "type": "string" }
+              },
+              "required": ["wallet_type", "token"]
+            }
+          },
+          "required": ["wallet"]
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "request_id",
+    "merchant_id",
+    "amount",
+    "currency",
+    "customer",
+    "payment_method"
+  ]
+}

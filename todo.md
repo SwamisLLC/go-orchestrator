@@ -180,8 +180,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 17: ContractMonitor & RetrospectiveReporter
 
 26. **ContractMonitor**  
-    - [ ] Create `internal/monitor/monitor.go` using `gojsonschema` to validate incoming JSON messages against a schema.  
-    - [ ] Write tests in `internal/monitor/monitor_test.go` simulating valid and invalid JSON.  
+    - [☑] Create `internal/monitor/monitor.go` using `gojsonschema` to validate incoming JSON messages against a schema.
+    - [☑] Write tests in `internal/monitor/monitor_test.go` simulating valid and invalid JSON.
 
 27. **RetrospectiveReporter**  
     - [ ] Create `internal/reporting/retrospective.go` with `GenerateRetrospective(logs []LogEntry)`.  
