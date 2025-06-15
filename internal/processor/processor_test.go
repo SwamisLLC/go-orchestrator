@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+	go_std_context "context" // Re-add for context.Background()
+
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +45,7 @@ func (m *MockProviderAdapter) GetName() string {
 
 func TestProcessor_ProcessSingleStep_Success(t *testing.T) {
 	// logger := zaptest.NewLogger(t) // Standard log will be used by processor
-	traceCtx := customcontext.NewTraceContext() // Use standard TraceContext constructor
+	traceCtx := customcontext.NewTraceContext(go_std_context.Background()) // Use standard TraceContext constructor
 	proc := NewProcessor()
 
 	mockAdapter := &MockProviderAdapter{
@@ -70,7 +72,7 @@ func TestProcessor_ProcessSingleStep_Success(t *testing.T) {
 	}
 	stepCtx := customcontext.StepExecutionContext{ /* APIKey: "dummy_key" */ }
 
-	result, err := proc.ProcessSingleStep(traceCtx, step, mockAdapter, stepCtx)
+	result, err := proc.ProcessSingleStep(traceCtx, stepCtx, step, mockAdapter) // Corrected order
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -89,7 +91,7 @@ func TestProcessor_ProcessSingleStep_Success(t *testing.T) {
 
 func TestProcessor_ProcessSingleStep_ProviderFailure(t *testing.T) {
 	// logger := zaptest.NewLogger(t)
-	traceCtx := customcontext.NewTraceContext()
+	traceCtx := customcontext.NewTraceContext(go_std_context.Background()) // Pass nil
 	proc := NewProcessor()
 
 	mockAdapter := &MockProviderAdapter{
@@ -117,7 +119,7 @@ func TestProcessor_ProcessSingleStep_ProviderFailure(t *testing.T) {
 	}
 	stepCtx := customcontext.StepExecutionContext{}
 
-	result, err := proc.ProcessSingleStep(traceCtx, step, mockAdapter, stepCtx)
+	result, err := proc.ProcessSingleStep(traceCtx, stepCtx, step, mockAdapter) // Corrected order
 
 	require.NoError(t, err) // The call to adapter was successful
 	require.NotNil(t, result)
@@ -133,7 +135,7 @@ func TestProcessor_ProcessSingleStep_ProviderFailure(t *testing.T) {
 
 func TestProcessor_ProcessSingleStep_AdapterError(t *testing.T) {
 	// logger := zaptest.NewLogger(t)
-	traceCtx := customcontext.NewTraceContext()
+	traceCtx := customcontext.NewTraceContext(go_std_context.Background()) // Pass nil
 	proc := NewProcessor()
 
 	expectedError := errors.New("adapter network communication failed")
@@ -156,7 +158,7 @@ func TestProcessor_ProcessSingleStep_AdapterError(t *testing.T) {
 	// Introduce a small delay to ensure latency is non-zero
 	time.Sleep(1 * time.Millisecond)
 
-	result, err := proc.ProcessSingleStep(traceCtx, step, mockAdapter, stepCtx)
+	result, err := proc.ProcessSingleStep(traceCtx, stepCtx, step, mockAdapter) // Corrected order
 
 	require.Error(t, err)
 	require.NotNil(t, result)
@@ -173,7 +175,7 @@ func TestProcessor_ProcessSingleStep_AdapterError(t *testing.T) {
 
 func TestProcessor_ProcessSingleStep_LatencyCalculation(t *testing.T) {
 	// logger := zaptest.NewLogger(t)
-	traceCtx := customcontext.NewTraceContext()
+	traceCtx := customcontext.NewTraceContext(go_std_context.Background()) // Pass nil
 	proc := NewProcessor()
 
 	mockAdapter := &MockProviderAdapter{
@@ -191,7 +193,7 @@ func TestProcessor_ProcessSingleStep_LatencyCalculation(t *testing.T) {
 	step := &protos.PaymentStep{StepId: "step_latency_test"}
 	stepCtx := customcontext.StepExecutionContext{}
 
-	result, err := proc.ProcessSingleStep(traceCtx, step, mockAdapter, stepCtx)
+	result, err := proc.ProcessSingleStep(traceCtx, stepCtx, step, mockAdapter) // Corrected order
 	require.NoError(t, err)
 	assert.True(t, result.GetLatencyMs() >= 20, "Calculated latency should be at least 20ms")
 }

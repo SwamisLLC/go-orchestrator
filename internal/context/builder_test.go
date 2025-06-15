@@ -3,6 +3,7 @@ package context
 import (
 	"testing"
 	"time"
+	go_std_context "context" // Aliased import for standard context
 
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
 	"github.com/stretchr/testify/assert"
@@ -10,14 +11,15 @@ import (
 )
 
 func TestNewTraceContext(t *testing.T) {
-	tc := NewTraceContext()
+	tc := NewTraceContext(go_std_context.Background()) // Updated
 	assert.NotEmpty(t, tc.TraceID, "TraceID should not be empty")
 	assert.NotEmpty(t, tc.SpanID, "SpanID should not be empty")
 	assert.NotNil(t, tc.Baggage, "Baggage should be initialized")
+	assert.NotNil(t, tc.Context(), "stdCtx should be initialized")
 }
 
 func TestTraceContext_NewSpan(t *testing.T) {
-	tc := NewTraceContext()
+	tc := NewTraceContext(go_std_context.Background()) // Updated
 	initialSpanID := tc.SpanID
 	newSpanID := tc.NewSpan()
 	assert.NotEmpty(t, newSpanID, "New SpanID should not be empty")
@@ -57,7 +59,7 @@ func TestBuildDomainContext(t *testing.T) {
 }
 
 func TestDeriveStepContext(t *testing.T) {
-	traceCtx := NewTraceContext()
+	traceCtx := NewTraceContext(go_std_context.Background()) // Updated
 	domainCtx := DomainContext{
 		MerchantID: "merchant123",
 		RetryPolicy: RetryPolicy{MaxAttempts: 2},
@@ -68,8 +70,9 @@ func TestDeriveStepContext(t *testing.T) {
 	}
 	overallTimeout := domainCtx.TimeoutConfig.OverallBudgetMs
 	startTimeForDomain := time.Now().Add(-1 * time.Second) // Pretend domain context was created 1 sec ago
+	attemptNumber := 1
 
-	stepCtx := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, startTimeForDomain)
+	stepCtx := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, startTimeForDomain, attemptNumber)
 
 	assert.Equal(t, traceCtx.TraceID, stepCtx.TraceID)
 	assert.NotEmpty(t, stepCtx.SpanID)
@@ -79,16 +82,22 @@ func TestDeriveStepContext(t *testing.T) {
 	assert.True(t, stepCtx.RemainingBudgetMs > 0, "Remaining budget should be positive")
 	assert.Equal(t, 2, stepCtx.StepRetryPolicy.MaxAttempts)
 	assert.Equal(t, "sk_test_stripe", stepCtx.ProviderCredentials.APIKey)
+	assert.Equal(t, attemptNumber, stepCtx.AttemptNumber)
+
 
 	// Test with budget nearly exhausted
+	attemptNumber = 2
 	almostExhaustedStartTime := time.Now().Add(-time.Duration(overallTimeout-100) * time.Millisecond)
-	stepCtxExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, almostExhaustedStartTime)
+	stepCtxExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, almostExhaustedStartTime, attemptNumber)
 	assert.True(t, stepCtxExhausted.RemainingBudgetMs > 0 && stepCtxExhausted.RemainingBudgetMs <= 100, "Remaining budget should be small but positive")
+	assert.Equal(t, attemptNumber, stepCtxExhausted.AttemptNumber)
 
 	// Test with budget fully exhausted
+	attemptNumber = 3
 	fullyExhaustedStartTime := time.Now().Add(-time.Duration(overallTimeout+100) * time.Millisecond)
-	stepCtxFullyExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, fullyExhaustedStartTime)
+	stepCtxFullyExhausted := DeriveStepContext(traceCtx, domainCtx, "stripe", overallTimeout, fullyExhaustedStartTime, attemptNumber)
 	assert.Equal(t, int64(0), stepCtxFullyExhausted.RemainingBudgetMs, "Remaining budget should be zero if overdue")
+	assert.Equal(t, attemptNumber, stepCtxFullyExhausted.AttemptNumber)
 }
 
 func TestContextBuilder_BuildContexts(t *testing.T) {
@@ -110,11 +119,13 @@ func TestContextBuilder_BuildContexts(t *testing.T) {
 			Amount:     100,
 			Currency:   "USD",
 		}
+		// Pass nil for parent context to NewTraceContext, it will use context.Background()
 		traceCtx, domainCtx, err := builder.BuildContexts(extReq)
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, traceCtx.TraceID)
 		assert.NotEmpty(t, traceCtx.SpanID)
+		assert.NotNil(t, traceCtx.Context()) // Check that stdCtx is initialized
 		assert.Equal(t, "merchant1", domainCtx.MerchantID)
 		assert.Equal(t, 1, domainCtx.MerchantPolicyVersion)
 		assert.Equal(t, cfg1.DefaultTimeout, domainCtx.TimeoutConfig)
@@ -139,6 +150,8 @@ func TestContextBuilder_BuildContexts(t *testing.T) {
 	})
 }
 
+// This test was for the old InMemoryMerchantConfigRepository.
+// It's adapted slightly for the new one which returns (*MerchantConfig, error) from GetConfig.
 func TestInMemoryMerchantConfigRepository(t *testing.T) {
 	repo := NewInMemoryMerchantConfigRepository()
 	cfg1 := MerchantConfig{ID: "m1", DefaultProvider: "stripe"}
@@ -147,15 +160,16 @@ func TestInMemoryMerchantConfigRepository(t *testing.T) {
 	repo.AddConfig(cfg1)
 	repo.AddConfig(cfg2)
 
-	res1, err1 := repo.Get("m1")
+	res1, err1 := repo.Get("m1") // Changed GetConfig to Get
 	require.NoError(t, err1)
+	// No NotNil check needed as Get returns MerchantConfig value, not pointer
 	assert.Equal(t, cfg1, res1)
 
-	res2, err2 := repo.Get("m2")
+	res2, err2 := repo.Get("m2") // Changed GetConfig to Get
 	require.NoError(t, err2)
 	assert.Equal(t, cfg2, res2)
 
-	_, err3 := repo.Get("m3")
+	_, err3 := repo.Get("m3") // Changed GetConfig to Get
 	require.Error(t, err3)
 	assert.Contains(t, err3.Error(), "merchant config not found for ID: m3")
 }

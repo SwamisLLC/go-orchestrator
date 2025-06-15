@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	go_std_context "context" // Re-add for context.Background()
 
 	"github.com/yourorg/payment-orchestrator/internal/adapter"
 	"github.com/yourorg/payment-orchestrator/internal/context"
@@ -20,16 +21,19 @@ func TestNewMockAdapter(t *testing.T) {
 
 func TestMockAdapter_Process_DefaultBehavior(t *testing.T) {
 	mock := NewMockAdapter("default_mock")
-	traceCtx := context.NewTraceContext()
+	traceCtx := context.NewTraceContext(go_std_context.Background()) // Updated
 	step := &internalv1.PaymentStep{
 		StepId:   "step-123",
 		Amount:   1000,
 		Currency: "USD",
 		ProviderPayload: make(map[string]string), // Ensure not nil
 	}
+	// Pass the traceCtx.Context() if StepExecutionContext needs the std context.Context
+	// For now, assuming StepExecutionContext's TraceID and SpanID are set as they were.
+	// The TraceContext object itself isn't usually part of StepExecutionContext.
 	stepCtx := context.StepExecutionContext{
-		TraceID: traceCtx.TraceID,
-		SpanID:  traceCtx.NewSpan(),
+		TraceID: traceCtx.GetTraceID(), // Use getter
+		SpanID:  traceCtx.GetSpanID(),  // Use getter
 		StartTime: time.Now(),
 	}
 
@@ -57,9 +61,13 @@ func TestMockAdapter_Process_WithCustomFunc_Success(t *testing.T) {
 		}, nil
 	}
 
-	traceCtx := context.NewTraceContext()
+	traceCtx := context.NewTraceContext(go_std_context.Background()) // Updated
 	step := &internalv1.PaymentStep{StepId: "step-custom-success", ProviderPayload: make(map[string]string)}
-	stepCtx := context.StepExecutionContext{StartTime: time.Now()}
+	stepCtx := context.StepExecutionContext{
+		TraceID: traceCtx.GetTraceID(),
+		SpanID:  traceCtx.GetSpanID(),
+		StartTime: time.Now(),
+	}
 
 	result, err := mock.Process(traceCtx, step, stepCtx)
 	require.NoError(t, err)
@@ -85,9 +93,13 @@ func TestMockAdapter_Process_WithCustomFunc_Error(t *testing.T) {
 		}, expectedError
 	}
 
-	traceCtx := context.NewTraceContext()
+	traceCtx := context.NewTraceContext(go_std_context.Background()) // Updated
 	step := &internalv1.PaymentStep{StepId: "step-custom-error", ProviderPayload: make(map[string]string)}
-	stepCtx := context.StepExecutionContext{StartTime: time.Now()}
+	stepCtx := context.StepExecutionContext{
+		TraceID: traceCtx.GetTraceID(),
+		SpanID:  traceCtx.GetSpanID(),
+		StartTime: time.Now(),
+	}
 
 	result, err := mock.Process(traceCtx, step, stepCtx)
 	require.Error(t, err)

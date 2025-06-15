@@ -1,12 +1,13 @@
 package planbuilder_test
 
 import (
-	"context as go_context" // Alias to avoid conflict with internal/context
+	go_context "context" // Correct alias for standard context package
 	"testing"
-	// "time" // Not directly needed now with simplified MerchantConfig
+	"fmt" // For error message in mock
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go" // Added for DTO inspection
 
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	"github.com/yourorg/payment-orchestrator/internal/planbuilder" // This is the package under test
@@ -15,30 +16,28 @@ import (
 )
 
 // MockMerchantConfigRepository is a mock implementation of MerchantConfigRepository.
+// It must match the interface: Get(merchantID string) (context.MerchantConfig, error)
 type MockMerchantConfigRepository struct {
-	cfg *context.MerchantConfig
+	cfg context.MerchantConfig // Store as value
 	err error
+	id  string // Store ID to match against for this simple mock
 }
 
-func (m *MockMerchantConfigRepository) GetConfig(merchantID string) (*context.MerchantConfig, error) {
+func (m *MockMerchantConfigRepository) Get(merchantID string) (context.MerchantConfig, error) {
 	if m.err != nil {
-		return nil, m.err
+		return context.MerchantConfig{}, m.err
 	}
-	// Ensure cfg is not nil before checking ID.
-	if m.cfg != nil && m.cfg.ID == merchantID {
+	if m.id == merchantID { // Only return cfg if ID matches what was set up
 		return m.cfg, nil
 	}
-	// If no specific config matches, return the stored cfg (which might be nil or a default)
-	// or an error if that's the desired behavior for "not found".
-	// For this test, if GetConfig is called with an ID that wasn't AddConfig'd,
-	// it might return a nil cfg if m.cfg wasn't set for *that* ID.
-	// The test specifically sets it up so it should be found.
-	return m.cfg, nil
+	return context.MerchantConfig{}, fmt.Errorf("mock config not found for ID: %s (mock configured for %s)", merchantID, m.id)
 }
 
-func (m *MockMerchantConfigRepository) AddConfig(cfg context.MerchantConfig) error {
-	m.cfg = &cfg
-	return nil
+// SetConfig is a helper for tests to set up the mock's state. Not part of the interface.
+func (m *MockMerchantConfigRepository) SetConfig(cfg context.MerchantConfig, err error) {
+	m.cfg = cfg
+	m.id = cfg.ID // Store the ID for matching in Get
+	m.err = err
 }
 
 // MockCompositePaymentService is a mock implementation of CompositePaymentService.
@@ -54,20 +53,24 @@ func (m *MockCompositePaymentService) Optimize(domainCtx context.DomainContext, 
 }
 
 func TestPlanBuilder_Metrics_SuccessfulBuild(t *testing.T) {
-	// Note on global metrics: These tests rely on globally registered Prometheus metrics via promauto.
-	// This means state can persist between test runs or if tests are run in parallel.
-	// The approach here is to measure the increment (current - initial) to mitigate this.
-	// A more robust solution for hermetic tests would involve a local Prometheus registry.
-
-	// Get initial metric values
 	initialRequests := testutil.ToFloat64(planbuilder.GetPlanRequestsTotal())
-	initialDurationCount := testutil.CollectAndGetCount(planbuilder.GetPlanBuildDurationSeconds())
 
-	// Setup PlanBuilder and its dependencies
+	var initialMetricDTO dto.Metric
+	var initialDurationCount uint64
+	if err := planbuilder.GetPlanBuildDurationSeconds().Write(&initialMetricDTO); err == nil {
+		if histo := initialMetricDTO.GetHistogram(); histo != nil {
+			initialDurationCount = histo.GetSampleCount()
+		} else {
+			initialDurationCount = 0 // Default if histogram part of DTO is nil
+		}
+	} else {
+		t.Logf("Warning: could not get initial histogram count: %v", err)
+		initialDurationCount = 0 // Default if Write fails
+	}
+
 	mockRepo := &MockMerchantConfigRepository{}
-	merchantID := "test-merchant-" + uuid.NewString() // Unique merchant ID for the test
+	merchantID := "test-merchant-" + uuid.NewString()
 
-	// Prepare MerchantConfig and add it to the mock repository
 	merchantCfg := context.MerchantConfig{
 		ID:              merchantID,
 		DefaultProvider: "mock-provider",
@@ -76,60 +79,56 @@ func TestPlanBuilder_Metrics_SuccessfulBuild(t *testing.T) {
 		UserPrefs:       map[string]string{"merchant_tier": "gold"},
 		DefaultTimeout:  context.TimeoutConfig{OverallBudgetMs: 1000, ProviderTimeoutMs: 600},
 	}
-	if err := mockRepo.AddConfig(merchantCfg); err != nil {
-		t.Fatalf("Failed to add merchant config to mock repo: %v", err)
-	}
-
+	mockRepo.SetConfig(merchantCfg, nil) // Use the helper to set up the mock
 
 	mockCompositeService := &MockCompositePaymentService{
 		OptimizeFunc: func(domainCtx context.DomainContext, plan *orchestratorinternalv1.PaymentPlan) (*orchestratorinternalv1.PaymentPlan, error) {
-			return plan, nil // Simple pass-through
+			return plan, nil
 		},
 	}
 
-	pb := planbuilder.NewPlanBuilder(mockRepo, mockCompositeService)
+	pb := planbuilder.NewPlanBuilder(mockRepo, mockCompositeService) // mockRepo now implements the interface
 
-	// Prepare contexts and request
-	// Use go_context.Background() for the actual context.Context
-	traceCtx := context.NewTraceContext(go_context.Background(), "test-trace-"+uuid.NewString())
+	mockTraceCtx := context.NewTraceContext(go_context.Background())
 
-	// Ensure ActiveMerchantConfig in DomainContext is correctly fetched for the merchantID
-	activeCfg, err := mockRepo.GetConfig(merchantID)
+	activeCfg, err := mockRepo.Get(merchantID)
 	if err != nil {
-		t.Fatalf("Failed to get merchant config for domain context: %v", err)
+		t.Fatalf("Failed to get merchant config for domain context setup: %v", err)
 	}
-	if activeCfg == nil {
-		t.Fatalf("ActiveMerchantConfig is nil in DomainContext setup, merchantID: %s", merchantID)
-	}
-
 
 	domainCtx := context.DomainContext{
-		TraceContext:         traceCtx,
 		ActiveMerchantConfig: activeCfg,
-		// Other fields can be zero/default if not directly used by Build's metric logic path
+		MerchantID:           merchantID,
 	}
 
 	extReq := &orchestratorexternalv1.ExternalRequest{
-		MerchantId: merchantID, // Ensure this matches the config
+		MerchantId: merchantID,
 		Amount:     1000,
 		Currency:   "USD",
 	}
 
-	// Call the Build method
-	_, err = pb.Build(domainCtx, extReq)
+	_, err = pb.Build(mockTraceCtx, domainCtx, extReq)
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
 	}
 
-	// Assert metrics increment
-	// 1. planRequestsTotal
 	finalRequests := testutil.ToFloat64(planbuilder.GetPlanRequestsTotal())
 	if finalRequests != initialRequests+1 {
 		t.Errorf("planRequestsTotal expected to increment by 1, got initial=%f, final=%f", initialRequests, finalRequests)
 	}
 
-	// 2. planBuildDurationSeconds (count of observations)
-	finalDurationCount := testutil.CollectAndGetCount(planbuilder.GetPlanBuildDurationSeconds())
+	var finalMetricDTO dto.Metric
+	var finalDurationCount uint64
+	if err := planbuilder.GetPlanBuildDurationSeconds().Write(&finalMetricDTO); err == nil {
+		if histo := finalMetricDTO.GetHistogram(); histo != nil {
+			finalDurationCount = histo.GetSampleCount()
+		} else {
+			t.Fatalf("Histogram field in DTO is nil after build")
+		}
+	} else {
+		t.Fatalf("Failed to write final histogram metric to DTO: %v", err)
+	}
+
 	if finalDurationCount != initialDurationCount+1 {
 		t.Errorf("planBuildDurationSeconds observation count expected to increment by 1, got initial=%d, final=%d", initialDurationCount, finalDurationCount)
 	}

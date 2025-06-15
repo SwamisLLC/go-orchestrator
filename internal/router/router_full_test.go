@@ -4,6 +4,7 @@ import (
 	// "fmt" // No longer used after removing/refactoring some test assertions
 	"testing"
 	"time"
+	go_std_context "context" // Re-add for context.Background()
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -11,22 +12,19 @@ import (
 
 	"github.com/yourorg/payment-orchestrator/internal/adapter"
 	adaptermock "github.com/yourorg/payment-orchestrator/internal/adapter/mock"
-	custom_context "github.com/yourorg/payment-orchestrator/internal/context"
+	custom_context "github.com/yourorg/payment-orchestrator/internal/context" // aliased to custom_context
 	"github.com/yourorg/payment-orchestrator/internal/router"
 	"github.com/yourorg/payment-orchestrator/internal/router/circuitbreaker"
 	protos "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 )
 
 // --- MockProcessor (local definition for this test package) ---
-// Note: This is named FullTestMockProcessor to distinguish from MockProcessor in router_test.go if they were in same package.
-// Since router_full_test.go is in package router_test, it's fine to name it MockProcessor if desired,
-// but keeping it distinct can avoid confusion if files are moved or merged.
 type FullTestMockProcessor struct {
 	mock.Mock
 }
 
-func (m *FullTestMockProcessor) ProcessSingleStep(ctx custom_context.StepExecutionContext, step *protos.PaymentStep, adapter adapter.ProviderAdapter) (*protos.StepResult, error) {
-	args := m.Called(ctx, step, adapter)
+func (m *FullTestMockProcessor) ProcessSingleStep(traceCtx custom_context.TraceContext, stepCtx custom_context.StepExecutionContext, step *protos.PaymentStep, selectedAdapter adapter.ProviderAdapter) (*protos.StepResult, error) {
+	args := m.Called(traceCtx, stepCtx, step, selectedAdapter) // Added traceCtx
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -35,8 +33,6 @@ func (m *FullTestMockProcessor) ProcessSingleStep(ctx custom_context.StepExecuti
 }
 
 // --- Test Helper Functions (local definition) ---
-// Renamed to avoid conflict if these helpers were in same package as router_test.go's helpers.
-// Using more descriptive names for "full tests".
 func fullTestSuccessfulStepResult(stepID, providerName string) *protos.StepResult {
 	return &protos.StepResult{StepId: stepID, Success: true, ProviderName: providerName, Details: map[string]string{"transaction_id": "txn_full_success_" + providerName}}
 }
@@ -66,13 +62,14 @@ func TestRouter_Full_CircuitBreaker_Opens_Then_HalfOpen_Then_Closes(t *testing.T
 	}
 	r, mockProc, cb := setupRouterForFullFeatureTests(t, cbCfg, routerCfg, adapters)
 	step := &protos.PaymentStep{StepId: "s1", Amount: 100, Currency: "USD"}
-	ctx := custom_context.StepExecutionContext{RemainingBudgetMs: 1000, TraceID: "trace-full-cb"}
+	traceCtx := custom_context.NewTraceContext(go_std_context.Background()) // Create TraceContext
+	ctx := custom_context.StepExecutionContext{RemainingBudgetMs: 1000, TraceID: traceCtx.GetTraceID()} // Use TraceID from traceCtx
 
 	// Phase 1: Primary fails, CB for p1 opens. Fallback p2 is used and succeeds.
-	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p1"]).Return(fullTestFailedStepResult(step.StepId, "p1", "P1_FAIL_OPENS_CB"), nil).Once()
-	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p2"]).Return(fullTestSuccessfulStepResult(step.StepId, "p2"), nil).Once()
+	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p1"]).Return(fullTestFailedStepResult(step.StepId, "p1", "P1_FAIL_OPENS_CB"), nil).Once()
+	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p2"]).Return(fullTestSuccessfulStepResult(step.StepId, "p2"), nil).Once()
 
-	result, err := r.ExecuteStep(ctx, step)
+	result, err := r.ExecuteStep(traceCtx, ctx, step) // Pass traceCtx
 	require.NoError(t, err)
 	assert.True(t, result.Success, "Fallback should succeed")
 	assert.Equal(t, "p2", result.ProviderName)
@@ -85,9 +82,9 @@ func TestRouter_Full_CircuitBreaker_Opens_Then_HalfOpen_Then_Closes(t *testing.T
 	mockProc.Calls = nil
 
 	// Phase 2: Attempt step again. Primary p1's circuit is Open. Router skips p1, tries p2. p2 succeeds.
-	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p2"]).Return(fullTestSuccessfulStepResult(step.StepId, "p2"), nil).Once()
+	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p2"]).Return(fullTestSuccessfulStepResult(step.StepId, "p2"), nil).Once()
 
-	result, err = r.ExecuteStep(ctx, step)
+	result, err = r.ExecuteStep(traceCtx, ctx, step) // Pass traceCtx
 	require.NoError(t, err)
 	assert.True(t, result.Success)
 	assert.Equal(t, "p2", result.ProviderName)
@@ -103,9 +100,9 @@ func TestRouter_Full_CircuitBreaker_Opens_Then_HalfOpen_Then_Closes(t *testing.T
 
 	// Phase 3: Wait for ResetTimeout. p1's circuit becomes HalfOpen. Router tries p1. p1 succeeds. Circuit for p1 closes.
 	time.Sleep(cbCfg.ResetTimeout + 20*time.Millisecond)
-	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p1"]).Return(fullTestSuccessfulStepResult(step.StepId, "p1"), nil).Once()
+	mockProc.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), mock.AnythingOfType("context.StepExecutionContext"), step, adapters["p1"]).Return(fullTestSuccessfulStepResult(step.StepId, "p1"), nil).Once()
 
-	result, err = r.ExecuteStep(ctx, step)
+	result, err = r.ExecuteStep(traceCtx, ctx, step) // Pass traceCtx
 	require.NoError(t, err)
 	assert.True(t, result.Success)
 	assert.Equal(t, "p1", result.ProviderName)
@@ -123,11 +120,12 @@ func TestRouter_Full_BothPrimaryAndFallbackSLABudgetExceeded(t *testing.T) {
     }
     r, mockProc, _ := setupRouterForFullFeatureTests(t, cbCfg, routerCfg, adapters) // cb instance not directly used for assertions here
     step := &protos.PaymentStep{StepId: "s1-sla", Amount: 100, Currency: "USD"}
+	 traceCtx := custom_context.NewTraceContext(go_std_context.Background())
 
     // Budget is too low for either primary or fallback (defaultMinRequiredBudgetMs is 50ms in router.go)
-    ctxLowBudget := custom_context.StepExecutionContext{RemainingBudgetMs: 40, TraceID: "trace-full-sla-both"}
+    ctxLowBudget := custom_context.StepExecutionContext{RemainingBudgetMs: 40, TraceID: traceCtx.GetTraceID()}
 
-    result, err := r.ExecuteStep(ctxLowBudget, step)
+    result, err := r.ExecuteStep(traceCtx, ctxLowBudget, step) // Pass traceCtx
 
     require.NoError(t, err) // Router itself does not error for this routing decision
     assert.False(t, result.Success)
@@ -136,7 +134,7 @@ func TestRouter_Full_BothPrimaryAndFallbackSLABudgetExceeded(t *testing.T) {
     assert.Contains(t, result.ErrorMessage, "insufficient SLA budget (40ms) for primary provider p1")
     assert.Contains(t, result.ErrorMessage, "Fallback Skipped (SLA): insufficient SLA budget (40ms) for fallback provider p2")
 
-    mockProc.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything)
+    mockProc.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything, mock.Anything) // Added one more mock.Anything for traceCtx
 }
 
 func TestRouter_Full_PrimaryCircuitOpen_FallbackSLASkipped(t *testing.T) {
@@ -148,25 +146,28 @@ func TestRouter_Full_PrimaryCircuitOpen_FallbackSLASkipped(t *testing.T) {
     }
     r, mockProc, cb := setupRouterForFullFeatureTests(t, cbCfg, routerCfg, adapters)
     step := &protos.PaymentStep{StepId: "s1-cb-sla", Amount:100, Currency:"USD"}
+	 traceCtx := custom_context.NewTraceContext(go_std_context.Background())
 
     // Budget is too low for fallback attempt
-    ctxLowBudget := custom_context.StepExecutionContext{RemainingBudgetMs: 40, TraceID: "trace-full-cb-sla"}
+    ctxLowBudget := custom_context.StepExecutionContext{RemainingBudgetMs: 40, TraceID: traceCtx.GetTraceID()}
 
     // Open P1 circuit
-    cb.RecordFailure("p1")
+    cb.RecordFailure("p1") // This makes P1's state = Open because FailureThreshold = 1
     statusP1Initial, _ := cb.GetProviderStatus("p1")
     require.Equal(t, circuitbreaker.StateOpen, statusP1Initial, "P1 circuit should be open for test setup")
 
-    result, err := r.ExecuteStep(ctxLowBudget, step)
+    result, err := r.ExecuteStep(traceCtx, ctxLowBudget, step) // Pass traceCtx
 
     require.NoError(t, err)
     assert.False(t, result.Success)
+    // The result.ProviderName might be p1 (if ExecuteStep sets it before SLA/CB checks) or empty.
+    // The current router.go sets ProviderName in the result even for SLA/CB failures before fallback.
     assert.Equal(t, "p1", result.ProviderName, "ProviderName should be primary from initial attempt info")
     assert.Equal(t, "ALL_PROVIDERS_UNAVAILABLE", result.ErrorCode, "ErrorCode should indicate no providers available")
-    // Check that the error message reflects the actual sequence: Primary SLA skip, then Fallback SLA skip.
-    // The fact that P1's CB was open is not hit because SLA for P1 fails first.
-    assert.Contains(t, result.ErrorMessage, "Primary Result (Code: SLA_BUDGET_EXCEEDED, Msg: insufficient SLA budget (40ms) for primary provider p1")
+	 // The message from router.ExecuteStep when primary CB is open and fallback SLA is also bad:
+    assert.Contains(t, result.ErrorMessage, "circuit open for primary provider p1")
     assert.Contains(t, result.ErrorMessage, "Fallback Skipped (SLA): insufficient SLA budget (40ms) for fallback provider p2")
 
-    mockProc.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything)
+
+    mockProc.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything, mock.Anything) // Added one more mock.Anything
 }
