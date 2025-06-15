@@ -2,9 +2,10 @@ package orchestrator
 
 import (
 	"fmt"
-	"time"
 	"log" // Added for logging
+	"time"
 
+	"go.opentelemetry.io/otel"
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	"github.com/yourorg/payment-orchestrator/internal/policy" // Added import for policy.PolicyDecision
 	// "github.com/yourorg/payment-orchestrator/internal/router" // Interface will be used
@@ -71,6 +72,16 @@ func (o *Orchestrator) Execute(
 	plan *internalv1.PaymentPlan,
 	domainCtx context.DomainContext,
 ) (PaymentResult, error) {
+	// Get a tracer instance
+	tracer := otel.Tracer("orchestrator")
+
+	// Start a new span
+	ctx, span := tracer.Start(traceCtx.Context(), "Orchestrator.Execute")
+	defer span.End()
+
+	// Update traceCtx with the new context from the span
+	traceCtx = context.NewTraceContext(ctx, traceCtx.TraceID())
+
 	if plan == nil || len(plan.Steps) == 0 {
 		return PaymentResult{Status: "FAILURE", FailureReason: "Plan is empty or nil"}, fmt.Errorf("plan cannot be empty or nil")
 	}

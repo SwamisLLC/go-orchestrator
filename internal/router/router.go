@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"go.opentelemetry.io/otel"
 	"github.com/yourorg/payment-orchestrator/internal/adapter"
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	"github.com/yourorg/payment-orchestrator/internal/router/circuitbreaker"
@@ -65,12 +66,22 @@ func NewRouter(
 }
 
 func (r *Router) ExecuteStep(
-	traceCtx context.TraceContext, // <<<< ADDED traceCtx
-	ctx context.StepExecutionContext,
+	originalTraceCtx context.TraceContext, // Renamed to avoid conflict with context from span
+	stepCtx context.StepExecutionContext, // Renamed from ctx to avoid conflict
 	step *orchestratorinternalv1.PaymentStep,
 ) (*orchestratorinternalv1.StepResult, error) {
+	// Get a tracer instance
+	tracer := otel.Tracer("router")
+
+	// Start a new span
+	ctx, span := tracer.Start(originalTraceCtx.Context(), "Router.ExecuteStep")
+	defer span.End()
+
+	// Update traceCtx with the new context from the span
+	traceCtx := context.NewTraceContext(ctx, originalTraceCtx.TraceID())
+
 	log.Printf("Router.ExecuteStep: [%s/%s] Processing step %s with primary provider %s. Budget: %dms",
-		traceCtx.TraceID, traceCtx.SpanID, step.GetStepId(), r.config.PrimaryProviderName, ctx.RemainingBudgetMs)
+		traceCtx.TraceID, traceCtx.SpanID, step.GetStepId(), r.config.PrimaryProviderName, stepCtx.RemainingBudgetMs)
 
 	minBudget := defaultMinRequiredBudgetMs
 
@@ -140,24 +151,36 @@ func (r *Router) ExecuteStep(
 }
 
 func (r *Router) tryFallback(
-	traceCtx context.TraceContext, // <<<< ADDED traceCtx
-	ctx context.StepExecutionContext,
+	originalTraceCtx context.TraceContext, // Renamed to avoid conflict
+	stepCtx context.StepExecutionContext, // Renamed from ctx to avoid conflict
 	step *orchestratorinternalv1.PaymentStep,
 	primaryResult *orchestratorinternalv1.StepResult,
 	primaryError error,
 ) (*orchestratorinternalv1.StepResult, error) {
+	// Get a tracer instance - assuming we want a new span for fallback attempt as well
+	tracer := otel.Tracer("router") // Or use a more specific name like "router.fallback"
+
+	// Start a new span for the fallback attempt
+	// It's important to use originalTraceCtx here to link it to the parent ExecuteStep span correctly
+	ctx, span := tracer.Start(originalTraceCtx.Context(), "Router.tryFallback")
+	defer span.End()
+
+	// Update traceCtx for this scope
+	traceCtx := context.NewTraceContext(ctx, originalTraceCtx.TraceID())
+
+
 	if r.config.FallbackProviderName == "" {
 		log.Printf("Router.tryFallback: [%s/%s] No fallback provider configured for step %s. Returning primary result.",
-			traceCtx.TraceID, traceCtx.SpanID, step.GetStepId())
+			traceCtx.TraceID, traceCtx.SpanID, step.GetStepId()) // Use new traceCtx for logging
 		return primaryResult, primaryError
 	}
 
 	log.Printf("Router.tryFallback: [%s/%s] Attempting fallback with provider %s for step %s. Budget: %dms",
-		traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId(), ctx.RemainingBudgetMs)
+		traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId(), stepCtx.RemainingBudgetMs) // Use new traceCtx and stepCtx
 
 	minBudget := defaultMinRequiredBudgetMs
 
-	if ctx.RemainingBudgetMs < minBudget {
+	if stepCtx.RemainingBudgetMs < minBudget { // Use stepCtx
 		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for fallback provider %s, minimum required %dms", ctx.RemainingBudgetMs, r.config.FallbackProviderName, minBudget)
 		log.Printf("Router.tryFallback: %s. Returning primary result.", errMsg)
 		if primaryError == nil && primaryResult != nil {

@@ -168,8 +168,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 16: Observability Integration
 
 24. **OpenTelemetry Tracing**  
-    - [ ] Add OTEL initialization in `cmd/server/main.go`, wrap Gin handlers with OTEL middleware.  
-    - [ ] Instrument `PlanBuilder.Build()`, `Orchestrator.Execute()`, `Router.ExecuteStep()` with spans (`Tracer.Start()` / `span.End()`).
+    - [☑] Add OTEL initialization in `cmd/server/main.go`, wrap Gin handlers with OTEL middleware.
+    - [☑] Instrument `PlanBuilder.Build()`, `Orchestrator.Execute()`, `Router.ExecuteStep()` with spans (`Tracer.Start()` / `span.End()`).
 
 25. **Prometheus Metrics**  
     - [ ] In `internal/planbuilder/planbuilder.go`, register and increment `plan_requests_total`, record `plan_build_duration_seconds`.  
