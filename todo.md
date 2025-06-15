@@ -172,8 +172,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
     - [☑] Instrument `PlanBuilder.Build()`, `Orchestrator.Execute()`, `Router.ExecuteStep()` with spans (`Tracer.Start()` / `span.End()`).
 
 25. **Prometheus Metrics**  
-    - [ ] In `internal/planbuilder/planbuilder.go`, register and increment `plan_requests_total`, record `plan_build_duration_seconds`.  
-    - [ ] Write tests in `internal/planbuilder/observability_test.go` to confirm metric increments when `Build()` is called.
+    - [☑] In `internal/planbuilder/planbuilder.go`, register and increment `plan_requests_total`, record `plan_build_duration_seconds`.
+    - [☑] Write tests in `internal/planbuilder/observability_test.go` to confirm metric increments when `Build()` is called.
 
 ---
 
