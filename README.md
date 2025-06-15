@@ -1,3 +1,102 @@
+# Payment Orchestration Platform
+
+This system is a payment orchestration platform designed for resilience, modularity, and observability. It routes payments across multiple providers, handles messy inputs gracefully, enforces schema discipline, and provides built-in observability and feedback loops.
+
+For a detailed technical blueprint and architecture, please refer to [spec2_1.md](spec2_1.md).
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Go**: Version 1.19 or later (check with `go version`)
+- **Buf**: Version 1.0 or later (check with `buf --version`). Installation instructions can be found at [buf.build/docs/installation](https://buf.build/docs/installation).
+- **golangci-lint**: Version 1.50 or later (check with `golangci-lint --version`). Installation instructions: [golangci-lint.run/usage/install/](https://golangci-lint.run/usage/install/).
+
+## Getting Started
+
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd payment-orchestrator
+    ```
+
+2.  **Install Go dependencies:**
+    ```bash
+    go mod tidy
+    ```
+
+## Build & Generation
+
+This project uses Makefiles for common tasks.
+
+-   **Generate code from Protobuf definitions:**
+    This command uses Buf to generate Go code from the `.proto` files in the `protos/` directory.
+    ```bash
+    make gen
+    ```
+
+-   **Build the application:**
+    This compiles the main server application.
+    ```bash
+    go build -o main cmd/server/main.go
+    ```
+    Alternatively, to build all packages:
+    ```bash
+    go build ./...
+    ```
+
+## Running Tests
+
+-   **Run all tests:**
+    This command will run all unit and integration tests in the project. It may also include linting as part of the CI process.
+    ```bash
+    make test
+    ```
+    To run tests for a specific package:
+    ```bash
+    go test ./internal/router/...
+    ```
+
+## Running the Server
+
+-   **Start the payment orchestrator server:**
+    ```bash
+    go run cmd/server/main.go
+    ```
+    By default, the server usually starts on a port like `:8080` (this might need to be confirmed from `cmd/server/main.go` or config).
+
+## Example Usage
+
+You can interact with the payment processing endpoint using `curl`. Here's an example of a `POST` request to the `/process-payment` endpoint:
+
+```bash
+curl -X POST http://localhost:8080/process-payment -H "Content-Type: application/json" -d '{
+  "request_id": "test-req-12345",
+  "merchant_id": "merchant-007",
+  "amount": 10000,
+  "currency": "USD",
+  "customer": {
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "555-1234"
+  },
+  "payment_method": {
+    "card": {
+      "card_number": "************1111",
+      "expiry_month": "12",
+      "expiry_year": "2025",
+      "cvv": "123"
+    }
+  },
+  "metadata": {
+    "order_id": "order-abc-789",
+    "product_sku": "SKU123"
+  }
+}'
+```
+
+---
+
 Here’s an executive-friendly **Architecture README** — tailored to help non-engineers, product leads, and execs understand the **design philosophy**, **resilience strategy**, and **business safeguards** of your payment orchestration platform.
 
 ---
@@ -100,4 +199,3 @@ We then:
 * Real-time SLA dashboards for merchants
 * Domain-specific anomaly detection
 * Event replay + time-travel debugging for payment failures
-
