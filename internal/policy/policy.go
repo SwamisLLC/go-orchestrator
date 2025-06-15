@@ -1,3 +1,8 @@
+// Package policy implements the PaymentPolicyEnforcer, a DSL-based rule engine.
+// It evaluates dynamic business policies (e.g., for fraud, retries, routing)
+// against the current payment context to make decisions that influence the
+// payment flow.
+// Refer to spec2_1.md, section 8.1 for more on PaymentPolicyEnforcer.
 package policy
 
 import (

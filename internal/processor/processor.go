@@ -1,3 +1,7 @@
+// Package processor acts as a thin wrapper around ProviderAdapter calls.
+// It is responsible for invoking the correct ProviderAdapter for a given
+// payment step and translating the ProviderResult into an internal StepResult format.
+// Refer to spec2_1.md, section 7.5 for more details on the Processor layer.
 package processor
 
 import (

@@ -1,3 +1,8 @@
+// Package monitor provides tools for monitoring the health and integrity
+// of the payment orchestration system. This includes the ContractMonitor,
+// which validates incoming requests against predefined JSON schemas to
+// ensure adherence to API contracts.
+// Refer to spec2_1.md, section 9.2 for more on ContractMonitor.
 package monitor
 
 import (

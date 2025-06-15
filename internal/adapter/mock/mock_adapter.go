@@ -1,3 +1,6 @@
+// Package mock provides a mock implementation of the ProviderAdapter interface.
+// It is used for testing and development purposes, allowing simulation of
+// different payment provider behaviors without making actual external calls.
 package mock
 
 import (

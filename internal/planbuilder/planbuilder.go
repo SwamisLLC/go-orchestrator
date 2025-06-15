@@ -1,3 +1,8 @@
+// Package planbuilder is responsible for constructing a PaymentPlan based on
+// merchant configuration and the incoming request context. It may involve
+// invoking domain services like a CompositePaymentService for fee and risk
+// optimization to determine the sequence of payment steps.
+// Refer to spec2_1.md, section 7.1 for more details on PlanBuilder.
 package planbuilder
 
 import (

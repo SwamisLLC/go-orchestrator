@@ -1,3 +1,9 @@
+// Package context defines the various context structures used throughout the
+// payment orchestration process. This includes TraceContext for observability,
+// DomainContext for business-relevant data, and StepExecutionContext for
+// per-payment-step data.
+// The package also includes builders for constructing these contexts.
+// Refer to spec2_1.md, section 4 for detailed context decomposition.
 package context
 
 import (

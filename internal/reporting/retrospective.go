@@ -1,3 +1,8 @@
+// Package reporting provides tools for generating reports from historical data.
+// The RetrospectiveReporter, for example, analyzes log entries to produce
+// summaries of payment activities, error rates, and provider performance
+// over a period.
+// Refer to spec2_1.md, section 9.3 for more on RetrospectiveReporter.
 package reporting
 
 import (

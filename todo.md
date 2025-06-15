@@ -192,17 +192,17 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 ## Chunk 18: Final Polish & Documentation
 
 28. **README Update**  
-    - [ ] Update `README.md` with:
-      - Project overview referencing `spec.md`.  
-      - Prerequisites (Go, Buf, golangci-lint).  
-      - Build & generation instructions (`make gen`, `go build`).  
-      - How to run tests (`make test`).  
-      - How to start the server (`go run cmd/server/main.go`).  
-      - Example `curl` usage.
+    - [☑] Update `README.md` with:
+      - [☑] Project overview referencing `spec.md`.
+      - [☑] Prerequisites (Go, Buf, golangci-lint).
+      - [☑] Build & generation instructions (`make gen`, `go build`).
+      - [☑] How to run tests (`make test`).
+      - [☑] How to start the server (`go run cmd/server/main.go`).
+      - [☑] Example `curl` usage.
 
 29. **Package Documentation**  
-    - [ ] Add top-of-file comments in each package (`internal/…/…go`) explaining its role.  
-    - [ ] Ensure `spec.md` references are up to date.  
+    - [☑] Add top-of-file comments in each package (`internal/…/…go`) explaining its role.
+    - [☑] Ensure `spec.md` references are up to date. (Note: `spec2_1.md` was used as the relevant spec document for these comments).
 
 30. **CI & Coverage**  
     - [ ] Verify `make ci` (Buf codegen, lint, tests) passes.  

@@ -1,3 +1,8 @@
+// Package router coordinates multi-provider orchestration for individual payment steps.
+// Its responsibilities include circuit-breaking, fallback sequencing based on policies,
+// SLA budget enforcement, parallel fan-out handling (if applicable), and emitting
+// unified telemetry for step attempts.
+// Refer to spec2_1.md, section 7.3 for more details on the Router.
 package router
 
 import (
@@ -85,8 +90,8 @@ func (r *Router) ExecuteStep(
 
 	minBudget := defaultMinRequiredBudgetMs
 
-	if ctx.RemainingBudgetMs < minBudget {
-		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for primary provider %s, minimum required %dms", ctx.RemainingBudgetMs, r.config.PrimaryProviderName, minBudget)
+	if stepCtx.RemainingBudgetMs < minBudget { // Corrected: stepCtx was shadowed by ctx from span
+		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for primary provider %s, minimum required %dms", stepCtx.RemainingBudgetMs, r.config.PrimaryProviderName, minBudget)
 		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
 		primaryResultForFallback := &orchestratorinternalv1.StepResult{
 			StepId:       step.GetStepId(),
@@ -96,7 +101,7 @@ func (r *Router) ExecuteStep(
 			ProviderName: r.config.PrimaryProviderName,
 		}
 		// ExecuteStep calls tryFallback, traceCtx must be passed here.
-		return r.tryFallback(traceCtx, ctx, step, primaryResultForFallback, nil)
+		return r.tryFallback(traceCtx, stepCtx, step, primaryResultForFallback, nil) // Corrected: stepCtx
 	}
 
 	primaryAdapter, ok := r.adapters[r.config.PrimaryProviderName]
@@ -123,10 +128,10 @@ func (r *Router) ExecuteStep(
 			ProviderName: r.config.PrimaryProviderName,
 		}
 		// ExecuteStep calls tryFallback, traceCtx must be passed here.
-		return r.tryFallback(traceCtx, ctx, step, primaryResultForFallback, nil)
+		return r.tryFallback(traceCtx, stepCtx, step, primaryResultForFallback, nil) // Corrected: stepCtx
 	}
 
-	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(traceCtx, ctx, step, primaryAdapter)
+	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(traceCtx, stepCtx, step, primaryAdapter) // Corrected: stepCtx
 
 	if primaryStepResult == nil {
 		if primaryErr != nil {
@@ -141,7 +146,7 @@ func (r *Router) ExecuteStep(
 		log.Printf("Router.ExecuteStep: Primary provider %s failed for step %s. Error: %v, ResultSuccess: %t. Recording failure and attempting fallback.", r.config.PrimaryProviderName, step.GetStepId(), primaryErr, primaryStepResult.Success)
 		r.cb.RecordFailure(r.config.PrimaryProviderName)
 		// ExecuteStep calls tryFallback, traceCtx must be passed here.
-		return r.tryFallback(traceCtx, ctx, step, primaryStepResult, primaryErr)
+		return r.tryFallback(traceCtx, stepCtx, step, primaryStepResult, primaryErr) // Corrected: stepCtx
 	}
 
 	log.Printf("Router.ExecuteStep: [%s/%s] Primary provider %s succeeded for step %s. Recording success.",
@@ -162,11 +167,11 @@ func (r *Router) tryFallback(
 
 	// Start a new span for the fallback attempt
 	// It's important to use originalTraceCtx here to link it to the parent ExecuteStep span correctly
-	ctx, span := tracer.Start(originalTraceCtx.Context(), "Router.tryFallback")
+	ctxFromSpan, span := tracer.Start(originalTraceCtx.Context(), "Router.tryFallback") // Renamed ctx to ctxFromSpan
 	defer span.End()
 
 	// Update traceCtx for this scope
-	traceCtx := context.NewTraceContext(ctx, originalTraceCtx.TraceID())
+	traceCtx := context.NewTraceContext(ctxFromSpan, originalTraceCtx.TraceID()) // Use ctxFromSpan
 
 
 	if r.config.FallbackProviderName == "" {
@@ -181,7 +186,7 @@ func (r *Router) tryFallback(
 	minBudget := defaultMinRequiredBudgetMs
 
 	if stepCtx.RemainingBudgetMs < minBudget { // Use stepCtx
-		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for fallback provider %s, minimum required %dms", ctx.RemainingBudgetMs, r.config.FallbackProviderName, minBudget)
+		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for fallback provider %s, minimum required %dms", stepCtx.RemainingBudgetMs, r.config.FallbackProviderName, minBudget) // Corrected: stepCtx
 		log.Printf("Router.tryFallback: %s. Returning primary result.", errMsg)
 		if primaryError == nil && primaryResult != nil {
 			primaryResult.ErrorMessage = fmt.Sprintf("Primary Result (Code: %s, Msg: %s); Fallback Skipped (SLA): %s",
@@ -222,7 +227,7 @@ func (r *Router) tryFallback(
 		return primaryResult, primaryError
 	}
 
-	fallbackStepResult, fallbackErr := r.processor.ProcessSingleStep(traceCtx, ctx, step, fallbackAdapter)
+	fallbackStepResult, fallbackErr := r.processor.ProcessSingleStep(traceCtx, stepCtx, step, fallbackAdapter) // Corrected: stepCtx
 
 	if fallbackStepResult == nil {
 		if fallbackErr != nil {
