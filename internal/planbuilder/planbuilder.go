@@ -4,11 +4,34 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	orchestratorinternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
 )
+
+var (
+	planRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "plan_requests_total",
+		Help: "Total number of plan requests.",
+	})
+	planBuildDurationSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "plan_build_duration_seconds",
+		Help: "Duration of plan build operations in seconds.",
+	})
+)
+
+// GetPlanRequestsTotal returns the planRequestsTotal metric for testing.
+func GetPlanRequestsTotal() prometheus.Counter {
+	return planRequestsTotal
+}
+
+// GetPlanBuildDurationSeconds returns the planBuildDurationSeconds metric for testing.
+func GetPlanBuildDurationSeconds() prometheus.Histogram {
+	return planBuildDurationSeconds
+}
 
 // PlanBuilder constructs a PaymentPlan from merchant config + incoming context.
 type PlanBuilder struct {
@@ -36,6 +59,13 @@ func NewPlanBuilder(repo context.MerchantConfigRepository, compositeSvc Composit
 // For this basic version, it creates a single-step plan using the merchant's default provider.
 // It also calls the composite service's Optimize method.
 func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestratorexternalv1.ExternalRequest) (*orchestratorinternalv1.PaymentPlan, error) {
+	// Increment total requests counter
+	planRequestsTotal.Inc()
+
+	// Start timer for duration histogram
+	timer := prometheus.NewTimer(planBuildDurationSeconds)
+	defer timer.ObserveDuration()
+
 	// Get a tracer instance
 	tracer := otel.Tracer("planbuilder")
 
