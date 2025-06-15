@@ -1,14 +1,18 @@
+// Package stripe implements the ProviderAdapter interface for Stripe.
+// It handles communication with the Stripe API, including request formation,
+// API key management, idempotency, and mapping Stripe's responses and errors
+// to the common ProviderResult format.
 package stripe
 
 import (
 	// "bytes" // Will be added back when Process is implemented if needed
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"log"
-
+	"time" // Added for retryDelay
 
 	"github.com/google/uuid"
 	// "github.com/yourorg/payment-orchestrator/internal/adapter" // For interface compliance

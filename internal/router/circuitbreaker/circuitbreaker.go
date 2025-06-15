@@ -1,3 +1,7 @@
+// Package circuitbreaker implements a circuit breaker mechanism to monitor
+// and control requests to payment providers. It tracks the health of each
+// provider, opening the circuit (stopping requests) if failure rates exceed
+// thresholds, and periodically allowing test requests to check for recovery.
 package circuitbreaker
 
 import (

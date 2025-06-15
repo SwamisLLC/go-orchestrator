@@ -201,8 +201,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
       - [☑] Example `curl` usage.
 
 29. **Package Documentation**  
-    - [ ] Add top-of-file comments in each package (`internal/…/…go`) explaining its role.  
-    - [ ] Ensure `spec.md` references are up to date.  
+    - [☑] Add top-of-file comments in each package (`internal/…/…go`) explaining its role.
+    - [☑] Ensure `spec.md` references are up to date. (Note: `spec2_1.md` was used as the relevant spec document for these comments).
 
 30. **CI & Coverage**  
     - [ ] Verify `make ci` (Buf codegen, lint, tests) passes.  

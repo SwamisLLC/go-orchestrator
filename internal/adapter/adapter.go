@@ -1,3 +1,9 @@
+// Package adapter defines the interface for payment provider adapters
+// and contains implementations for specific providers.
+// Adapters handle all provider-specific API calls, including serialization,
+// retry logic, backoff strategies, idempotency, and error mapping,
+// normalizing raw provider responses into a common ProviderResult format.
+// Refer to spec2_1.md, section 7.4 for more details on ProviderAdapters.
 package adapter
 
 import (

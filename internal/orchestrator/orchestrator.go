@@ -1,3 +1,8 @@
+// Package orchestrator is responsible for managing the execution of a payment plan.
+// It iterates through the steps of a PaymentPlan, applies high-level policies,
+// derives per-step execution contexts, and coordinates with the Router
+// for actual step execution.
+// Refer to spec2_1.md, section 7.2 for more details on the Orchestrator.
 package orchestrator
 
 import (
