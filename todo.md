@@ -184,8 +184,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
     - [☑] Write tests in `internal/monitor/monitor_test.go` simulating valid and invalid JSON.
 
 27. **RetrospectiveReporter**  
-    - [ ] Create `internal/reporting/retrospective.go` with `GenerateRetrospective(logs []LogEntry)`.  
-    - [ ] Write tests in `internal/reporting/retrospective_test.go` for log aggregation and report contents.
+    - [☑] Create `internal/reporting/retrospective.go` with `GenerateRetrospective(logs []LogEntry)`.
+    - [☑] Write tests in `internal/reporting/retrospective_test.go` for log aggregation and report contents.
 
 ---
 
