@@ -2,9 +2,10 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json" // Keep for unmarshalling response
 	"net/http"
 	"net/http/httptest"
+	"google.golang.org/protobuf/encoding/protojson" // Added for protojson.Marshal
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -87,8 +88,9 @@ func TestProcessPayment_InvalidRequest_ValidationError_MissingMerchantID(t *test
 		Amount:     1000,
 		Currency:   "USD",
 	}
-	jsonValue, err := json.Marshal(payload)
-	require.NoError(t, err, "Failed to marshal payload")
+	jsonValue, err := protojson.Marshal(&payload) // Use protojson.Marshal, pass by reference
+	require.NoError(t, err, "Failed to marshal payload with protojson")
+	// Removed duplicated line above
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")
@@ -113,8 +115,9 @@ func TestProcessPayment_InvalidRequest_ValidationError_InvalidAmount(t *testing.
 		Amount:     0, // Invalid
 		Currency:   "USD",
 	}
-	jsonValue, err := json.Marshal(payload)
-	require.NoError(t, err, "Failed to marshal payload")
+	// jsonValue, err := json.Marshal(payload) // This was the problematic line
+	jsonValue, err := protojson.Marshal(&payload) // Corrected to protojson.Marshal
+	require.NoError(t, err, "Failed to marshal payload with protojson")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")
@@ -139,8 +142,8 @@ func TestProcessPayment_InvalidRequest_ValidationError_MissingCurrency(t *testin
 		Amount:     1000,
 		Currency:   "", // Invalid
 	}
-	jsonValue, err := json.Marshal(payload)
-	require.NoError(t, err, "Failed to marshal payload")
+	jsonValue, err := protojson.Marshal(&payload) // Use protojson.Marshal, pass by reference
+	require.NoError(t, err, "Failed to marshal payload with protojson")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")

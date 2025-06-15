@@ -1,28 +1,34 @@
-# Makefile for payment-orchestrator
+# Makefile
 
-.PHONY: all gen lint test clean
+# Variables
+GO := go
+BUF := buf
+GOLANGCI_LINT := golangci-lint
 
+# Default target
 all: gen lint test
 
-# Generate code from protobuf schemas
+# Targets
 gen:
-	@echo "Generating code from schemas..."
-	# Placeholder for actual buf generate command
-	# buf generate
+	@echo "Generating Go code from Protobuf..."
+	@$(BUF) generate
 
-# Lint Go files
 lint:
-	@echo "Linting Go files..."
-	# Placeholder for actual lint command
-	# golangci-lint run ./...
+	@echo "Linting Go code..."
+	@$(GOLANGCI_LINT) run ./...
 
-# Run tests
 test:
-	@echo "Running tests..."
-	# Placeholder for actual test command
-	# go test -v ./...
+	@echo "Running Go tests with race detection and coverage..."
+	@$(GO) test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-# Clean generated files and build artifacts
+ci: gen lint test
+	@echo "CI pipeline completed successfully."
+
 clean:
-	@echo "Cleaning up..."
-	# Placeholder for clean commands
+	@echo "Cleaning up generated files and build artifacts..."
+	@$(GO) clean -testcache
+	@rm -f coverage.out main
+	# Consider if pkg/gen/* should be cleaned, often it's kept
+	# @rm -rf pkg/gen/*
+
+.PHONY: all gen lint test ci clean

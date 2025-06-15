@@ -63,7 +63,7 @@ func NewPlanBuilder(repo context.MerchantConfigRepository, compositeSvc Composit
 // Build constructs a payment plan.
 // For this basic version, it creates a single-step plan using the merchant's default provider.
 // It also calls the composite service's Optimize method.
-func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestratorexternalv1.ExternalRequest) (*orchestratorinternalv1.PaymentPlan, error) {
+func (b *PlanBuilder) Build(traceCtx context.TraceContext, domainCtx context.DomainContext, extReq *orchestratorexternalv1.ExternalRequest) (*orchestratorinternalv1.PaymentPlan, error) {
 	// Increment total requests counter
 	planRequestsTotal.Inc()
 
@@ -74,12 +74,13 @@ func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestrato
 	// Get a tracer instance
 	tracer := otel.Tracer("planbuilder")
 
-	// Start a new span
-	ctx, span := tracer.Start(domainCtx.TraceContext.Context(), "PlanBuilder.Build")
+	// Start a new span using the context from the passed-in traceCtx
+	newStdCtx, span := tracer.Start(traceCtx.Context(), "PlanBuilder.Build")
 	defer span.End()
 
-	// Update domainCtx with the new context from the span
-	domainCtx.TraceContext = context.NewTraceContext(ctx, domainCtx.TraceContext.TraceID())
+	// Update traceCtx with the new context and span details
+	// Propagate the original TraceID, update with new stdCtx and new OTEL span ID
+	traceCtx = context.NewTraceContextWithIDs(newStdCtx, traceCtx.GetTraceID(), span.SpanContext().SpanID().String())
 
 
 	if extReq == nil {

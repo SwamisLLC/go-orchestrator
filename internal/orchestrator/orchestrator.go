@@ -85,7 +85,14 @@ func (o *Orchestrator) Execute(
 	defer span.End()
 
 	// Update traceCtx with the new context from the span
-	traceCtx = context.NewTraceContext(ctx, traceCtx.TraceID())
+	// The new stdCtx (named 'ctx' here) comes from tracer.Start()
+	// The TraceID is propagated from the original traceCtx (which is 'traceCtx' before this line)
+	// The SpanID for the new TraceContext should be the ID of the new OpenTelemetry span
+	// Make sure to capture the original TraceID before 'traceCtx' is reassigned if it's not from an outer scope.
+	// In this function signature, traceCtx is an input parameter, so its GetTraceID() is the original.
+	originalTraceID := traceCtx.GetTraceID() // Capture before reassignment if traceCtx was from a wider scope and mutable
+	traceCtx = context.NewTraceContextWithIDs(ctx, originalTraceID, span.SpanContext().SpanID().String())
+
 
 	if plan == nil || len(plan.Steps) == 0 {
 		return PaymentResult{Status: "FAILURE", FailureReason: "Plan is empty or nil"}, fmt.Errorf("plan cannot be empty or nil")

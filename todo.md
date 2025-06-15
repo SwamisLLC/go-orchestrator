@@ -205,8 +205,8 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
     - [☑] Ensure `spec.md` references are up to date. (Note: `spec2_1.md` was used as the relevant spec document for these comments).
 
 30. **CI & Coverage**  
-    - [ ] Verify `make ci` (Buf codegen, lint, tests) passes.  
-    - [ ] Check code coverage and aim for >90%.  
+    - [ ] Verify `make ci` (Buf codegen, lint, tests) passes. (Note: Blocked by a remaining SA1012 linting error in router_test.go)
+    - [ ] Check code coverage and aim for >90%. (Note: Blocked by CI not passing)
 
 31. **Release Preparation**  
     - [ ] Tag version `v1.0.0`.  

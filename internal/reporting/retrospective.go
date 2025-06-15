@@ -101,13 +101,8 @@ func (rr *RetrospectiveReporter) GenerateRetrospective(logs []LogEntry) (*Retros
 	// Calculate ProcessingDuration only if DateFrom and DateTo were meaningfully set
 	if firstTimestampSet { // Or check !report.DateFrom.IsZero() if logs could have zero timestamps
 		report.ProcessingDuration = report.DateTo.Sub(report.DateFrom)
-	} else if len(logs) > 0 { // Handle case where all logs might have zero timestamps (unlikely but defensive)
-        // If all timestamps were zero, DateFrom and DateTo remain zero.
-        // ProcessingDuration will be zero, which is correct.
-		// Or, if only one log entry and its timestamp was zero, DateFrom/To are zero.
-		// If DateFrom/To were initialized to logs[0].Timestamp and that was non-zero,
-		// this 'else if' is not strictly needed, 'firstTimestampSet' handles it.
-    }
+	}
+    // Removed empty else-if branch SA9003
 
 
 	return report, nil

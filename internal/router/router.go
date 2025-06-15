@@ -6,6 +6,7 @@
 package router
 
 import (
+	"errors" // Added for errors.New
 	"fmt"
 	"log"
 
@@ -83,10 +84,13 @@ func (r *Router) ExecuteStep(
 	defer span.End()
 
 	// Update traceCtx with the new context from the span
-	traceCtx := context.NewTraceContext(ctx, originalTraceCtx.TraceID())
+	// The new stdCtx (named 'ctx' here) comes from tracer.Start()
+	// The TraceID is propagated from the originalTraceCtx
+	// The SpanID for the new TraceContext should be the ID of the new OpenTelemetry span
+	traceCtx := context.NewTraceContextWithIDs(ctx, originalTraceCtx.GetTraceID(), span.SpanContext().SpanID().String())
 
 	log.Printf("Router.ExecuteStep: [%s/%s] Processing step %s with primary provider %s. Budget: %dms",
-		traceCtx.TraceID, traceCtx.SpanID, step.GetStepId(), r.config.PrimaryProviderName, stepCtx.RemainingBudgetMs)
+		traceCtx.GetTraceID(), traceCtx.GetSpanID(), step.GetStepId(), r.config.PrimaryProviderName, stepCtx.RemainingBudgetMs)
 
 	minBudget := defaultMinRequiredBudgetMs
 
@@ -114,7 +118,7 @@ func (r *Router) ExecuteStep(
 			ErrorCode:    "ROUTER_CONFIGURATION_ERROR",
 			ErrorMessage: errMsg,
 			ProviderName: r.config.PrimaryProviderName,
-		}, fmt.Errorf(errMsg)
+		}, errors.New(errMsg) // Changed to errors.New
 	}
 
 	if !r.cb.AllowRequest(r.config.PrimaryProviderName) {
@@ -171,17 +175,20 @@ func (r *Router) tryFallback(
 	defer span.End()
 
 	// Update traceCtx for this scope
-	traceCtx := context.NewTraceContext(ctxFromSpan, originalTraceCtx.TraceID()) // Use ctxFromSpan
+	// The new stdCtx (named 'ctxFromSpan' here) comes from tracer.Start()
+	// The TraceID is propagated from the originalTraceCtx
+	// The SpanID for the new TraceContext should be the ID of the new OpenTelemetry span
+	traceCtx := context.NewTraceContextWithIDs(ctxFromSpan, originalTraceCtx.GetTraceID(), span.SpanContext().SpanID().String())
 
 
 	if r.config.FallbackProviderName == "" {
 		log.Printf("Router.tryFallback: [%s/%s] No fallback provider configured for step %s. Returning primary result.",
-			traceCtx.TraceID, traceCtx.SpanID, step.GetStepId()) // Use new traceCtx for logging
+			traceCtx.GetTraceID(), traceCtx.GetSpanID(), step.GetStepId()) // Use new traceCtx for logging
 		return primaryResult, primaryError
 	}
 
 	log.Printf("Router.tryFallback: [%s/%s] Attempting fallback with provider %s for step %s. Budget: %dms",
-		traceCtx.TraceID, traceCtx.SpanID, r.config.FallbackProviderName, step.GetStepId(), stepCtx.RemainingBudgetMs) // Use new traceCtx and stepCtx
+		traceCtx.GetTraceID(), traceCtx.GetSpanID(), r.config.FallbackProviderName, step.GetStepId(), stepCtx.RemainingBudgetMs) // Use new traceCtx and stepCtx
 
 	minBudget := defaultMinRequiredBudgetMs
 
@@ -212,7 +219,7 @@ func (r *Router) tryFallback(
 			originalPrimaryErrorCode, originalPrimaryErrorMsg, errMsg)
 
 		if primaryError == nil {
-			return primaryResult, fmt.Errorf(errMsg)
+			return primaryResult, errors.New(errMsg) // Changed to errors.New
 		}
 		return primaryResult, primaryError
 	}

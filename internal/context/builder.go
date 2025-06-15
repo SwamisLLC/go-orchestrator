@@ -1,6 +1,7 @@
 package context
 
 import (
+	go_std_context "context" // Added for context.Background()
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
 	"fmt"
 )
@@ -53,18 +54,20 @@ func NewContextBuilder(repo MerchantConfigRepository) *ContextBuilder {
 // BuildContexts creates TraceContext and DomainContext from an external request.
 func (cb *ContextBuilder) BuildContexts(extReq *orchestratorexternalv1.ExternalRequest) (TraceContext, DomainContext, error) {
 	if extReq == nil {
-		return TraceContext{}, DomainContext{}, fmt.Errorf("external request cannot be nil")
+		return NewTraceContext(go_std_context.Background()), DomainContext{}, fmt.Errorf("external request cannot be nil")
 	}
 
-	traceCtx := NewTraceContext() // Initialize TraceContext
+	traceCtx := NewTraceContext(go_std_context.Background()) // Initialize TraceContext with context.Background()
 
 	merchantCfg, err := cb.merchantRepo.Get(extReq.MerchantId)
 	if err != nil {
+		// Return the initialized traceCtx even on error
 		return traceCtx, DomainContext{}, fmt.Errorf("failed to get merchant config: %w", err)
 	}
 
 	domainCtx, err := BuildDomainContext(extReq, merchantCfg)
 	if err != nil {
+		// Return the initialized traceCtx even on error
 		return traceCtx, DomainContext{}, fmt.Errorf("failed to build domain context: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	// go_std_context "context" // Standard Go context for NewTraceContext - Removed
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -24,11 +25,12 @@ type MockProcessor struct {
 }
 
 func (m *MockProcessor) ProcessSingleStep(
-	ctx context.StepExecutionContext,
+	traceCtx context.TraceContext, // Added traceCtx
+	stepCtx context.StepExecutionContext,
 	step *orchestratorinternalv1.PaymentStep,
-	adapter adapter.ProviderAdapter,
+	selectedAdapter adapter.ProviderAdapter,
 ) (*orchestratorinternalv1.StepResult, error) {
-	args := m.Called(ctx, step, adapter)
+	args := m.Called(traceCtx, stepCtx, step, selectedAdapter) // Added traceCtx
 	res, _ := args.Get(0).(*orchestratorinternalv1.StepResult)
 	return res, args.Error(1)
 }
@@ -92,9 +94,10 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		FallbackProviderName: "fallback",
 	}
 
+	dummyTraceCtx := context.NewTraceContext(nil) // Common TraceContext for tests
 	defaultStepCtx := context.StepExecutionContext{
-		TraceID:           "test-trace",
-		SpanID:            "test-span",
+		TraceID:           dummyTraceCtx.GetTraceID(),
+		SpanID:            dummyTraceCtx.GetSpanID(), // This will be the initial span
 		StartTime:         time.Now(),
 		RemainingBudgetMs: 1000,       // Sufficient for defaultMinRequiredBudgetMs = 50
 	}
@@ -110,10 +113,10 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.NoError(t, err)
 
 		expectedResult := successfulStepResult(dummyPaymentStep.StepId, "primary")
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(expectedResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
 		assert.NoError(t, err)
 		assert.Equal(t, expectedResult, result)
@@ -131,12 +134,12 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		primaryFailResult := failedStepResult(dummyPaymentStep.StepId, "primary", "PRIMARY_FAIL")
 		fallbackExpectedResult := successfulStepResult(dummyPaymentStep.StepId, "fallback")
 
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(primaryFailResult, nil).Once()
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockFallbackAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockFallbackAdapter).
 			Return(fallbackExpectedResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
 		assert.NoError(t, err)
 		assert.Equal(t, fallbackExpectedResult, result)
@@ -157,13 +160,13 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		primaryError := errors.New("primary provider error")
 		fallbackExpectedResult := successfulStepResult(dummyPaymentStep.StepId, "fallback")
 
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(primaryStepResult, primaryError).Once()
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockFallbackAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockFallbackAdapter).
 			Return(fallbackExpectedResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
-		assert.NoError(t, err)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
+		assert.NoError(t, err) // Error from primary is handled, fallback result is returned
 		assert.Equal(t, fallbackExpectedResult, result)
 		mockProcessor.AssertExpectations(t)
 	})
@@ -179,12 +182,12 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		fallbackFailResult := failedStepResult(dummyPaymentStep.StepId, "fallback", "FALLBACK_FAIL")
 		fallbackError := errors.New("fallback provider error")
 
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(primaryFailResult, nil).Once()
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockFallbackAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockFallbackAdapter).
 			Return(fallbackFailResult, fallbackError).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
 		assert.Error(t, err)
 		assert.Equal(t, fallbackError, err)
@@ -200,14 +203,14 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.NoError(t, err)
 
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "primary provider adapter 'nonexistent' not found")
 		assert.False(t, result.GetSuccess())
 		assert.Equal(t, "ROUTER_CONFIGURATION_ERROR", result.GetErrorCode())
 		assert.Equal(t, "nonexistent", result.GetProviderName())
-		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything)
+		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything, mock.Anything) // Added mock.Anything for traceCtx
 	})
 
 	t.Run("Fallback provider adapter not found (after primary fails)", func(t *testing.T) {
@@ -218,13 +221,14 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.NoError(t, err)
 
 		primaryFailResult := failedStepResult(dummyPaymentStep.StepId, "primary", "PRIMARY_FAIL")
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(primaryFailResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
-		assert.Error(t, err)
+		assert.Error(t, err) // Error is now expected from tryFallback when adapter not found
 		assert.Contains(t, err.Error(), "fallback provider adapter 'nonexistent' not found")
+		// The result will be the augmented primaryFailResult
 		assert.Equal(t, primaryFailResult.StepId, result.StepId)
 		assert.False(t, result.Success)
 		assert.Equal(t, "ROUTER_CONFIGURATION_ERROR", result.GetErrorCode())
@@ -242,10 +246,10 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.False(t, cb.AllowRequest("primary"))
 
 		fallbackExpectedResult := successfulStepResult(dummyPaymentStep.StepId, "fallback")
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockFallbackAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockFallbackAdapter).
 			Return(fallbackExpectedResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
 		assert.NoError(t, err)
 		assert.True(t, result.GetSuccess())
@@ -265,12 +269,12 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.False(t, cb.AllowRequest("fallback"))
 
 		primaryFailResult := failedStepResult(dummyPaymentStep.StepId, "primary", "PRIMARY_FAIL_CB_TEST")
-		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.StepExecutionContext"), dummyPaymentStep, mockPrimaryAdapter).
+		mockProcessor.On("ProcessSingleStep", mock.AnythingOfType("context.TraceContext"), defaultStepCtx, dummyPaymentStep, mockPrimaryAdapter).
 			Return(primaryFailResult, nil).Once()
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
-		assert.Nil(t, err)
+		assert.Nil(t, err) // Error from primary is handled, result reflects primary failure + fallback info
 		assert.False(t, result.GetSuccess())
 		assert.Equal(t, "primary", result.GetProviderName())
 		assert.Equal(t, "PRIMARY_FAIL_CB_TEST", result.GetErrorCode())
@@ -289,14 +293,14 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		require.False(t, cb.AllowRequest("primary"))
 		require.False(t, cb.AllowRequest("fallback"))
 
-		result, err := routerInstance.ExecuteStep(defaultStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, defaultStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
-		assert.Nil(t, err)
+		assert.Nil(t, err) // Router returns result, not error, for this condition
 		assert.False(t, result.GetSuccess())
 		assert.Equal(t, "primary", result.GetProviderName())
 		assert.Equal(t, "ALL_PROVIDERS_UNAVAILABLE", result.GetErrorCode())
 		assert.Contains(t, result.GetErrorMessage(), "Primary Error: [circuit open for primary provider primary]; Fallback Circuit Open: [circuit open for fallback provider fallback]")
-		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything)
+		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything, mock.Anything) // Added mock.Anything for traceCtx
 	})
 
 	// --- SLA Budget Tests ---
@@ -308,16 +312,16 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		routerInstance, err := router.NewRouter(mockProcessor, mockAdapters, defaultRouterConfig, cb)
 		require.NoError(t, err)
 
-		slaStepCtx := context.StepExecutionContext{RemainingBudgetMs: lowBudgetMs, TraceID: "sla-both-trace"}
+		slaStepCtx := context.StepExecutionContext{RemainingBudgetMs: lowBudgetMs, TraceID: dummyTraceCtx.GetTraceID()} // Use TraceID
 
-		result, err := routerInstance.ExecuteStep(slaStepCtx, dummyPaymentStep)
+		result, err := routerInstance.ExecuteStep(dummyTraceCtx, slaStepCtx, dummyPaymentStep) // Pass dummyTraceCtx
 
-		assert.Nil(t, err)
+		assert.Nil(t, err) // Router returns result, not error
 		assert.False(t, result.GetSuccess())
 		assert.Equal(t, "ALL_PROVIDERS_UNAVAILABLE", result.GetErrorCode())
 		assert.Equal(t, "primary", result.GetProviderName()) // Primary was attempted first (conceptually)
 		assert.Contains(t, result.GetErrorMessage(), "insufficient SLA budget ("+fmt.Sprintf("%d",lowBudgetMs)+"ms) for primary provider primary")
 		assert.Contains(t, result.GetErrorMessage(), "Fallback Skipped (SLA): insufficient SLA budget ("+fmt.Sprintf("%d",lowBudgetMs)+"ms) for fallback provider fallback")
-		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything)
+		mockProcessor.AssertNotCalled(t, "ProcessSingleStep", mock.Anything, mock.Anything, mock.Anything, mock.Anything) // Added mock.Anything for traceCtx
 	})
 }

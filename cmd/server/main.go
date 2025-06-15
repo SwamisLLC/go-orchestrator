@@ -158,7 +158,8 @@ func processPaymentHandler(c *gin.Context) {
 	}
 
 	// Build Plan
-	paymentPlan, err := pb.Build(domainCtx, &req)
+	// Pass traceCtx to pb.Build
+	paymentPlan, err := pb.Build(traceCtx, domainCtx, &req)
 	if err != nil {
 		log.Printf("Error building payment plan: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error building payment plan: " + err.Error()})
