@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 	"github.com/yourorg/payment-orchestrator/internal/context"
 	orchestratorinternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
@@ -35,6 +36,17 @@ func NewPlanBuilder(repo context.MerchantConfigRepository, compositeSvc Composit
 // For this basic version, it creates a single-step plan using the merchant's default provider.
 // It also calls the composite service's Optimize method.
 func (b *PlanBuilder) Build(domainCtx context.DomainContext, extReq *orchestratorexternalv1.ExternalRequest) (*orchestratorinternalv1.PaymentPlan, error) {
+	// Get a tracer instance
+	tracer := otel.Tracer("planbuilder")
+
+	// Start a new span
+	ctx, span := tracer.Start(domainCtx.TraceContext.Context(), "PlanBuilder.Build")
+	defer span.End()
+
+	// Update domainCtx with the new context from the span
+	domainCtx.TraceContext = context.NewTraceContext(ctx, domainCtx.TraceContext.TraceID())
+
+
 	if extReq == nil {
 		return nil, fmt.Errorf("external request cannot be nil")
 	}

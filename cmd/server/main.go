@@ -1,10 +1,18 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 
 	custom_context "github.com/yourorg/payment-orchestrator/internal/context"
 	"github.com/yourorg/payment-orchestrator/internal/orchestrator"
@@ -18,6 +26,44 @@ import (
 	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
 	protos "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorinternalv1"
 )
+
+// initTracer creates and registers a new OpenTelemetry tracer provider.
+func initTracer() (*sdktrace.TracerProvider, error) {
+	// Create a new stdout exporter.
+	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new resource with service name "payment-orchestrator".
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("payment-orchestrator"),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new tracer provider with the exporter and resource.
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+
+	// Register the tracer provider globally.
+	otel.SetTracerProvider(tp)
+
+	// Set the text map propagator to the Stackdriver propagator.
+	// Note: The import "contrib.go.opencensus.io/exporter/stackdriver/propagation"
+	// was requested, but otel has its own propagation package.
+	// Using W3C Trace Context propagator as a standard alternative.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	return tp, nil
+}
 
 func processPaymentHandler(c *gin.Context) {
 	var req orchestratorexternalv1.ExternalRequest
@@ -132,12 +178,28 @@ func processPaymentHandler(c *gin.Context) {
 
 func setupRouter() *gin.Engine {
 	router := gin.Default()
+
+	// Add OpenTelemetry middleware
+	router.Use(otelgin.Middleware("payment-orchestrator-service"))
+
 	router.POST("/process-payment", processPaymentHandler)
 	return router
 }
 
 func main() {
 	log.Println("Starting server...")
+
+	// Initialize OpenTelemetry tracer provider
+	tp, err := initTracer()
+	if err != nil {
+		log.Fatalf("Failed to initialize tracer: %v", err)
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down tracer provider: %v", err)
+		}
+	}()
+
 	router := setupRouter()
 	if err := router.Run(":8080"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
