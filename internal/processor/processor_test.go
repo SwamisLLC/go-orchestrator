@@ -144,6 +144,8 @@ func TestProcessor_ProcessSingleStep_AdapterError(t *testing.T) {
 			return "test-adapter-error-provider"
 		},
 		ProcessFunc: func(tc customcontext.TraceContext, s *protos.PaymentStep, sc customcontext.StepExecutionContext) (adapter.ProviderResult, error) {
+			// Simulate some work before erroring to ensure measurable latency
+			time.Sleep(5 * time.Millisecond)
 			// Adapter itself returns an error
 			return adapter.ProviderResult{}, expectedError
 		},
@@ -154,9 +156,6 @@ func TestProcessor_ProcessSingleStep_AdapterError(t *testing.T) {
 		ProviderName: "test-adapter-error-provider",
 	}
 	stepCtx := customcontext.StepExecutionContext{}
-
-	// Introduce a small delay to ensure latency is non-zero
-	time.Sleep(1 * time.Millisecond)
 
 	result, err := proc.ProcessSingleStep(traceCtx, stepCtx, step, mockAdapter) // Corrected order
 

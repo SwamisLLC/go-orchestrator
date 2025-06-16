@@ -40,8 +40,11 @@ func TestNewContractMonitor(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for non-existent schema, got nil")
 		}
-		if !strings.Contains(err.Error(), "no such file or directory") && !strings.Contains(err.Error(), "cannot find the file") { // Error messages can vary
-			t.Errorf("Expected 'no such file or directory' or 'cannot find the file' in error, got: %v", err)
+		// Check for the actual error message parts from gojsonschema
+		expectedErrorPart1 := "error loading or compiling schema"
+		expectedErrorPart2 := "must be canonical" // This is part of the specific error for non-existent files
+		if !strings.Contains(err.Error(), expectedErrorPart1) || !strings.Contains(err.Error(), expectedErrorPart2) {
+			t.Errorf("Expected error to contain '%s' and '%s', got: %v", expectedErrorPart1, expectedErrorPart2, err)
 		}
 	})
 
