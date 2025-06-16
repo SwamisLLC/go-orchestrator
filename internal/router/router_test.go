@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
-	// go_std_context "context" // Standard Go context for NewTraceContext - Removed
+	std "context" // Standard Go context for NewTraceContext
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -94,7 +94,7 @@ func TestRouter_ExecuteStep(t *testing.T) {
 		FallbackProviderName: "fallback",
 	}
 
-	dummyTraceCtx := context.NewTraceContext(nil) // Common TraceContext for tests
+	dummyTraceCtx := context.NewTraceContext(std.Background()) // Common TraceContext for tests
 	defaultStepCtx := context.StepExecutionContext{
 		TraceID:           dummyTraceCtx.GetTraceID(),
 		SpanID:            dummyTraceCtx.GetSpanID(), // This will be the initial span
