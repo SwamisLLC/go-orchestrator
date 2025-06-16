@@ -5,14 +5,12 @@ import (
 	"encoding/json" // Keep for unmarshalling response
 	"net/http"
 	"net/http/httptest"
-	"google.golang.org/protobuf/encoding/protojson" // Added for protojson.Marshal
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yourorg/payment-orchestrator/internal/orchestrator" // For PaymentResult
-	orchestratorexternalv1 "github.com/yourorg/payment-orchestrator/pkg/gen/protos/orchestratorexternalv1"
 )
 
 // setupTestRouter helper function (uses setupRouter from main.go)
@@ -83,14 +81,14 @@ func TestProcessPayment_InvalidRequest_BindingError(t *testing.T) {
 func TestProcessPayment_InvalidRequest_ValidationError_MissingMerchantID(t *testing.T) {
 	router := setupTestRouter()
 
-	payload := orchestratorexternalv1.ExternalRequest{
-		MerchantId: "", // Invalid
-		Amount:     1000,
-		Currency:   "USD",
+	// Construct payload as a map to ensure correct JSON structure
+	payloadMap := map[string]interface{}{
+		"merchant_id": "", // Invalid
+		"amount":      1000,
+		"currency":    "USD",
 	}
-	jsonValue, err := protojson.Marshal(&payload) // Use protojson.Marshal, pass by reference
-	require.NoError(t, err, "Failed to marshal payload with protojson")
-	// Removed duplicated line above
+	jsonValue, err := json.Marshal(payloadMap)
+	require.NoError(t, err, "Failed to marshal payloadMap")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")
@@ -110,14 +108,14 @@ func TestProcessPayment_InvalidRequest_ValidationError_MissingMerchantID(t *test
 func TestProcessPayment_InvalidRequest_ValidationError_InvalidAmount(t *testing.T) {
 	router := setupTestRouter()
 
-	payload := orchestratorexternalv1.ExternalRequest{
-		MerchantId: "merchant-123",
-		Amount:     0, // Invalid
-		Currency:   "USD",
+	// Construct payload as a map to ensure correct JSON structure
+	payloadMap := map[string]interface{}{
+		"merchant_id": "merchant-123",
+		"amount":      0, // Invalid
+		"currency":    "USD",
 	}
-	// jsonValue, err := json.Marshal(payload) // This was the problematic line
-	jsonValue, err := protojson.Marshal(&payload) // Corrected to protojson.Marshal
-	require.NoError(t, err, "Failed to marshal payload with protojson")
+	jsonValue, err := json.Marshal(payloadMap)
+	require.NoError(t, err, "Failed to marshal payloadMap")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")
@@ -137,13 +135,14 @@ func TestProcessPayment_InvalidRequest_ValidationError_InvalidAmount(t *testing.
 func TestProcessPayment_InvalidRequest_ValidationError_MissingCurrency(t *testing.T) {
 	router := setupTestRouter()
 
-	payload := orchestratorexternalv1.ExternalRequest{
-		MerchantId: "merchant-123",
-		Amount:     1000,
-		Currency:   "", // Invalid
+	// Construct payload as a map to ensure correct JSON structure
+	payloadMap := map[string]interface{}{
+		"merchant_id": "merchant-123",
+		"amount":      1000,
+		"currency":    "", // Invalid
 	}
-	jsonValue, err := protojson.Marshal(&payload) // Use protojson.Marshal, pass by reference
-	require.NoError(t, err, "Failed to marshal payload with protojson")
+	jsonValue, err := json.Marshal(payloadMap)
+	require.NoError(t, err, "Failed to marshal payloadMap")
 
 	req, err := http.NewRequest(http.MethodPost, "/process-payment", bytes.NewBuffer(jsonValue))
 	require.NoError(t, err, "Failed to create request")

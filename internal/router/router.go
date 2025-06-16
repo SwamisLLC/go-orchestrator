@@ -94,20 +94,7 @@ func (r *Router) ExecuteStep(
 
 	minBudget := defaultMinRequiredBudgetMs
 
-	if stepCtx.RemainingBudgetMs < minBudget { // Corrected: stepCtx was shadowed by ctx from span
-		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for primary provider %s, minimum required %dms", stepCtx.RemainingBudgetMs, r.config.PrimaryProviderName, minBudget)
-		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
-		primaryResultForFallback := &orchestratorinternalv1.StepResult{
-			StepId:       step.GetStepId(),
-			Success:      false,
-			ErrorCode:    "SLA_BUDGET_EXCEEDED",
-			ErrorMessage: errMsg,
-			ProviderName: r.config.PrimaryProviderName,
-		}
-		// ExecuteStep calls tryFallback, traceCtx must be passed here.
-		return r.tryFallback(traceCtx, stepCtx, step, primaryResultForFallback, nil) // Corrected: stepCtx
-	}
-
+	// Adapter existence check first
 	primaryAdapter, ok := r.adapters[r.config.PrimaryProviderName]
 	if !ok {
 		errMsg := fmt.Sprintf("primary provider adapter '%s' not found", r.config.PrimaryProviderName)
@@ -121,6 +108,7 @@ func (r *Router) ExecuteStep(
 		}, errors.New(errMsg) // Changed to errors.New
 	}
 
+	// Then, Circuit Breaker Check for Primary
 	if !r.cb.AllowRequest(r.config.PrimaryProviderName) {
 		errMsg := fmt.Sprintf("circuit open for primary provider %s", r.config.PrimaryProviderName)
 		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
@@ -135,6 +123,22 @@ func (r *Router) ExecuteStep(
 		return r.tryFallback(traceCtx, stepCtx, step, primaryResultForFallback, nil) // Corrected: stepCtx
 	}
 
+	// Then, SLA Budget Check for Primary
+	if stepCtx.RemainingBudgetMs < minBudget { // Corrected: stepCtx was shadowed by ctx from span
+		errMsg := fmt.Sprintf("insufficient SLA budget (%dms) for primary provider %s, minimum required %dms", stepCtx.RemainingBudgetMs, r.config.PrimaryProviderName, minBudget)
+		log.Printf("Router.ExecuteStep: %s. Attempting fallback.", errMsg)
+		primaryResultForFallback := &orchestratorinternalv1.StepResult{
+			StepId:       step.GetStepId(),
+			Success:      false,
+			ErrorCode:    "SLA_BUDGET_EXCEEDED",
+			ErrorMessage: errMsg,
+			ProviderName: r.config.PrimaryProviderName,
+		}
+		// ExecuteStep calls tryFallback, traceCtx must be passed here.
+		return r.tryFallback(traceCtx, stepCtx, step, primaryResultForFallback, nil) // Corrected: stepCtx
+	}
+
+	// If all checks pass, proceed with primaryAdapter
 	primaryStepResult, primaryErr := r.processor.ProcessSingleStep(traceCtx, stepCtx, step, primaryAdapter) // Corrected: stepCtx
 
 	if primaryStepResult == nil {
