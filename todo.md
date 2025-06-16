@@ -206,7 +206,7 @@ This `todo.md` tracks which implementation steps have been completed (☑) and w
 
 30. **CI & Coverage**  
     - [☑] Verify `make ci` (Buf codegen, lint, tests) passes. (Note: SA1012 linting error fixed. All tests pass.)
-    - [ ] Check code coverage and aim for >90%. (Note: Current coverage is 43.3%, below the >90% target.)
+    - [ ] Check code coverage and aim for >90%. (Note: Current overall coverage is 45.1%, below the >90% target.)
 
 31. **Release Preparation**  
     - [ ] Tag version `v1.0.0`.  
